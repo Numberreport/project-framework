@@ -7,7 +7,7 @@ body:
     id: situation
     attributes:
       label: 遇到的情况
-      description: 实际遇到了什么。
+      description: 实际遇到了什么，不写账号、密钥、个人信息或项目隐私。
     validations:
       required: true
   - type: input
@@ -33,6 +33,6 @@ body:
     id: workaround
     attributes:
       label: 是否已临时变通
-      description: 项目里临时怎么处理的；没有就写「无」。
+      description: 项目里临时怎么处理的；没有就写「无」，不写账号、密钥、个人信息或项目隐私。
     validations:
       required: true
