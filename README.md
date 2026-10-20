@@ -2,6 +2,8 @@
 
 AI 项目通用框架模板：用模块、信息流和检查脚本组织项目，让 AI 和人按同一套规则协作。
 
+适用范围：适合让 AI 长期做的项目（不限编程），项目照 `template/` 搭。
+
 ## 怎么用
 
 1. 把 `template/` 里的全部内容（含 `.gitignore`、`.gitattributes`）复制到新项目根目录。
@@ -11,4 +13,8 @@ AI 项目通用框架模板：用模块、信息流和检查脚本组织项目�
 
 ## 反馈
 
-框架规则不顺手、检查误报漏报等，到本仓库 [Issues](https://github.com/Numberreport/project-framework/issues) 用「框架反馈」模板提交。
+框架规则不顺手、互相矛盾、检查误报漏报，或缺了该有的规定，提一份反馈交回模板维护者。
+
+- 先问用户同不同意；同意后到本仓库 [Issues](https://github.com/Numberreport/project-framework/issues/new?template=framework-feedback.yml) 用「框架反馈」模板提 Issue，一件事一个，保持简短。用户不同意就不提。
+- 仓库是公开的，Issue 里不写账号、密钥、个人信息或项目隐私。
+- 用不了 GitHub 的，把反馈要点告诉用户，由用户转交。
