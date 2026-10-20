@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,7 +23,9 @@ const OS_JUNK = new Set(['Thumbs.db', 'desktop.ini', '.DS_Store']);
 const STALE_MS = 30 * 24 * 60 * 60 * 1000;
 // 超时只杀外层进程；子进程（Windows 下尤其常见）可能残留，需要手动结束。
 const VERIFY_TIMEOUT_MS = 60 * 1000;
-const ROOT_FIXED = new Set(['AGENTS.md', 'TREE.md', 'scripts']);
+const ROOT_FIXED = new Set(['AGENTS.md', 'TREE.md', 'README.md', 'scripts']);
+// 普通模块反向写归属的节名，如「属于哪个组合」「所属组合」「父模块」
+const OWNER_SECTION = /^(属于|所属|所在|归属|父|上级).{0,3}(模块|组合)$|^归属$/;
 // 工具和构建配置，不算项目内容
 const ROOT_IGNORED = new Set([
   'node_modules', 'dist', 'build', '__pycache__', 'venv',
@@ -43,6 +45,10 @@ const isSafePath = (path) =>
   && !/^[A-Za-z]:/.test(path)
   && !path.includes('\\')
   && !path.split('/').includes('..');
+const isInside = (parent, child) => {
+  const rel = relative(parent, child);
+  return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel);
+};
 
 const readSections = (path) => {
   const sections = {};
@@ -128,6 +134,11 @@ for (const [name, status] of parseTable(treeSections['模块'] || '').filter((ro
     add(`模块名只能是单段，不能含 / \\ 或 ..：${name}`);
     continue;
   }
+  // 单独的 . 会指到模块目录本身，点开头的是隐藏目录
+  if (name.startsWith('.')) {
+    add(`模块名不能以 . 开头：${name}`);
+    continue;
+  }
   if (seenNames.has(name)) add(`重复登记：${name} 在模块表里出现了不止一次`);
   seenNames.add(name);
   rows.push({ name, status });
@@ -179,8 +190,8 @@ for (const { name, status } of rows) {
   for (const section of isCombo ? COMBO_SECTIONS : SECTIONS) {
     if (!sections[section]) add(`规格缺项：${name} / ${section}`);
   }
-  if ('属于哪个模块' in sections) {
-    warnings.push(`「属于哪个模块」已取消：${name}（组合关系只写在组合的「成员」里）`);
+  for (const title of Object.keys(sections).filter((title) => OWNER_SECTION.test(title))) {
+    add(`模块不写自己属于谁：${name} / ${title}（组合关系只写在组合的「成员」里）`);
   }
 
   if (isCombo) {
@@ -250,10 +261,15 @@ for (const { name, status } of rows) {
   }
   if (command && validCommand) {
     const scriptPath = command.slice('node '.length).trim();
-    if (isSafePath(scriptPath)) {
-      commands.set(name, scriptPath);
-    } else {
+    const scriptAbs = join(root, scriptPath);
+    if (!isSafePath(scriptPath)) {
       add(`验收脚本路径不合法（不能用 ..、绝对路径或盘符）：${name} -> ${scriptPath}`);
+    } else if (!isInside(dir, scriptAbs)
+      || (existsSync(scriptAbs) && !isInside(realpathSync(dir), realpathSync(scriptAbs)))) {
+      // 软链接按真实路径算，指到模块外的也不行
+      add(`验收脚本必须在本模块目录里：${name} -> ${scriptPath}`);
+    } else {
+      commands.set(name, scriptPath);
     }
   }
 
@@ -285,10 +301,17 @@ for (const { name, status } of rows) {
 for (const moduleDir of moduleDirs) {
   if (!existsSync(moduleDir)) continue;
   for (const entry of readdirSync(moduleDir)) {
-    if (entry.startsWith('.') || OS_JUNK.has(entry)) continue;
+    if (OS_JUNK.has(entry)) continue;
     const path = join(moduleDir, entry);
-    if (!statSync(path).isDirectory()) {
+    const isDir = statSync(path).isDirectory();
+    // .gitkeep 之类的点文件放行；点目录不能登记成模块，一律算计划外
+    if (entry.startsWith('.') && !isDir) continue;
+    if (!isDir) {
       add(`模块目录下只能放模块目录：${entry}`);
+      continue;
+    }
+    if (entry.startsWith('.')) {
+      add(`计划外的目录：${entry}（模块名不能以 . 开头；先确认是什么，再挪走或删掉）`);
       continue;
     }
     if (!names.has(entry)) add(`未登记：${entry} 不在模块表里`);
@@ -529,12 +552,21 @@ const roleEntries = (role) => (locations.get(role) || [])
     .filter((entry) => !entry.startsWith('.') && !OS_JUNK.has(entry)));
 
 // 暂存滞留提醒：看文件名开头的日期
+const today = new Date();
+const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 for (const entry of roleEntries('暂存')) {
   const time = nameDate(entry);
   if (time === null) {
-    warnings.push(`暂存缺日期：${entry}（文件名以 YYYY-MM-DD- 开头）`);
+    // 开头像日期却不是 YYYY-MM-DD-（如 2026-1-01-b、20260101-b）算写错，不算缺日期
+    if (/^\d+[-./_]\d+[-./_]\d+|^\d{8}/.test(entry)) {
+      add(`暂存日期格式不对：${entry}（文件名以 YYYY-MM-DD- 开头，月和日补足两位）`);
+    } else {
+      warnings.push(`暂存缺日期：${entry}（文件名以 YYYY-MM-DD- 开头）`);
+    }
   } else if (Number.isNaN(time)) {
     add(`暂存日期无效：${entry}`);
+  } else if (time > todayStart) {
+    warnings.push(`暂存日期在未来：${entry}（文件名用放进来当天的日期）`);
   } else if (Date.now() - time > STALE_MS) {
     warnings.push(`过期暂存：${entry}（超过 30 天，收尾时归位或删掉）`);
   }
