@@ -1,0 +1,38 @@
+name: 框架反馈
+description: 框架规则不顺手、互相矛盾、检查误报漏报，或缺了该有的规定
+title: "框架反馈："
+labels: [framework-feedback]
+body:
+  - type: textarea
+    id: situation
+    attributes:
+      label: 遇到的情况
+      description: 实际遇到了什么。
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: 问题在框架哪处
+      description: AGENTS.md 哪节、check.mjs 哪项检查。
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 建议怎么改
+    validations:
+      required: true
+  - type: input
+    id: impact
+    attributes:
+      label: 影响哪些文件
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 是否已临时变通
+      description: 项目里临时怎么处理的；没有就写「无」。
+    validations:
+      required: true
