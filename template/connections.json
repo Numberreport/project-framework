@@ -1,0 +1,26 @@
+{
+  "connections": [
+    {
+      "from": {
+        "module": "$self",
+        "port": "text"
+      },
+      "to": {
+        "module": "example-combo",
+        "port": "text"
+      },
+      "info": "原始文字"
+    },
+    {
+      "from": {
+        "module": "example-combo",
+        "port": "text"
+      },
+      "to": {
+        "module": "$self",
+        "port": "text"
+      },
+      "info": "重排后的文字"
+    }
+  ]
+}

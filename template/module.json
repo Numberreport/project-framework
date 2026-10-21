@@ -1,0 +1,10 @@
+{
+  "id": "project-example",
+  "name": "示例项目",
+  "template": {
+    "id": "project-framework",
+    "version": "2.0.0"
+  },
+  "status": "ready",
+  "verify": "implementation/verify.mjs"
+}

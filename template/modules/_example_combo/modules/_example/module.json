@@ -1,0 +1,10 @@
+{
+  "id": "example-text",
+  "name": "文字重排",
+  "template": {
+    "id": "project-framework",
+    "version": "2.0.0"
+  },
+  "status": "ready",
+  "verify": "implementation/verify.mjs"
+}

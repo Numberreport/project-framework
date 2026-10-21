@@ -1,33 +1,25 @@
-# 模块清单
+# 模块与位置
 
 ## 位置
 
-> 下表是示例，迁移规则见 AGENTS.md「收纳」。
-
-| 职责 | 目录 |
+| 职责 | 位置 |
 | --- | --- |
-| 模块 | modules |
-| 实现 | 本体/实现 |
-| 资料 | 本体/资料 |
-| 文档 | 本体/文档 |
-| 方法 | methodology |
-| 产出 | 本体/产出 |
-| 状态 | 本体/state |
-| 暂存 | 本体/scratch |
+| 项目配套文件 | 根目录，与普通模块采用相同结构 |
+| 直接成员 | 当前模块的 modules/，继续按同一结构展开 |
+| 实现 | 各模块 implementation/ |
+| 默认设置与偏好 | 各模块 settings/ |
+| 运行记录 | 各模块 runs/ |
+| 正式成果 | 各模块 outputs/ |
+| 知识资料 | 各模块 knowledge/，按需 |
+| 方法、配置标准、全景 | methodology/ |
+| 配置检查及全景工具 | scripts/ |
+
+目录是成员唯一来源，module.json 记录稳定标识和版本，connections.json 是连接唯一来源。本页只指位置，不另维护模块或成员清单。示例可以改名或替换；新位置使用新标识并重新配置。
 
 ## 项目全景
 
-> 由 `node scripts/panorama.mjs` 从模块表和各模块 README 生成。成员是引用，不是上下级。连接写传什么信息。导航分类可有可无，不是父级。进了多个组合的模块标成复用。没登记的连接标成缺项，不猜执行顺序。
+[概览](methodology/overview.svg)
 
-[概览](本体/文档/overview.svg)
+[详细说明](methodology/panorama.md)
 
-[详细说明](本体/文档/panorama.md)
-
-## 模块
-
-> 组合模块也登记在这里。组合和成员的关系只写在组合的「成员」里，`node scripts/check.mjs --tree` 可以看。
-
-| 模块 | 状态 |
-| --- | --- |
-| _example | 实验中 |
-| _example_combo | 实验中 |
+从实际模块和连接生成。结构变化后运行 `node scripts/panorama.mjs`，再运行检查。

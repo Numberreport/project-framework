@@ -1,16 +1,12 @@
-# 产出和大文件
-本体/产出/*
-!本体/产出/.gitkeep
-
-# 依赖和缓存
+# 运行记录、成果与本机设置，配套定义继续版本管理
+runs/
+outputs/
 node_modules/
 __pycache__/
 .venv/
 venv/
 dist/
 build/
-
-# 密钥
 .env
 .env.*
 !.env.example
@@ -20,8 +16,6 @@ id_rsa*
 id_ed25519*
 credentials.json
 secrets.json
-
-# 系统文件
 .DS_Store
 Thumbs.db
 desktop.ini

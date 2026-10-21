@@ -1,40 +1,9 @@
-# _example_combo
+# 文字重排组合
 
-> 这是组合样板，用完删掉这个目录，或者改名成真实组合。
-> 有「成员」一节的就是组合。组合靠成员处理信息，不写「谁处理」「失败怎么办」。
-> 「连接」每行写 `- 上游 -> 下游：传什么信息`，上下游都要在「成员」里；只有一个成员时写（无）。
+本位置专用配套文件，共用的是模板，不是配置。
 
-## 成员
+- [输入](INPUT.md)、[输出](OUTPUT.md)、[处理流程](PROCESS.md)、[检验标准](VALIDATION.md)。
+- [默认设置](settings/DEFAULTS.md)、[当前位置偏好](settings/PREFERENCES.md)。
+- 通用执行方法：[运行与维护](../../methodology/operation.md)。
 
-- _example
-
-## 连接
-
-（无）
-
-## 输入
-
-什么：一段文字。
-从哪来：外部
-
-## 输出
-
-经 _example 重排后的一段文字。
-
-## 人工确认
-
-_example 出结果后，人看过再交出去。
-
-## 失败在哪停
-
-_example 失败就停在 _example，不交出结果，等人处理。
-
-## 什么时候跑
-
-手动触发。
-
-## 怎么算做对
-
-成员各自的验收已通过；输入交给 _example 后，拿到的结果能直接当本组合的输出（非空文字）。
-
-验收命令：node modules/_example_combo/verify.mjs
+无外部工具。调用入口为 implementation/run.mjs，命令见处理流程。新位置复制后先改为 pending 并重新配置。

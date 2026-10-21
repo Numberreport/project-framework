@@ -1,24 +1,28 @@
 # project-framework
 
-AI 项目通用框架模板：用模块、信息流和检查脚本组织项目，让 AI 和人按同一套规则协作。
+人与 AI 协作的方法模板：把复杂的事情简单化，把简单的事情流程化。
 
 适用范围：适合让 AI 长期做的项目（不限编程），项目照 `template/` 搭。
 
-方法论设计讨论存档见 [2026-10-22 讨论稿](docs/methodology-draft-2026-10-22.md)。这是尚未实现的设计，现行用法仍以以下说明及 `template/` 为准。
+当前模板为 2.0.0：每个位置各有一套模块文件，组合与项目采用同样结构。提供配置检查、全景和可运行示例；分身调度、自动修正、清理及升级的执行约定已写入方法，但未提供后台服务。
+
+[2026-10-22 讨论稿](docs/methodology-draft-2026-10-22.md) 保留讨论时的存档状态；当前采用情况以模板及 [方法首页](template/methodology/README.md) 为准。
 
 ## 怎么用
 
 1. 把 `template/` 里的全部内容（含 `.gitignore`、`.gitattributes`）复制到新项目根目录。
-2. 改 `AGENTS.md`：标题换成项目名，补「使用说明」「维护窗口」。
-3. 按实际目录改 `TREE.md` 的「位置」表，删掉或替换 `_example` 示例模块。
+2. 按 [文件模板与中文对照](template/methodology/module-template.md) 修改项目和各位置的配套文件；新位置重新配置，用新标识，先设为 pending。
+3. 替换示例模块及连接，配置完成后审阅必需条件，再改为 ready。普通模块不需要 modules/ 和 connections.json。
 4. 在新项目里 `git init`，跑 `node scripts/check.mjs --verify`（需要 Node 18+）。
-5. 模板示例含「项目全景」。改了模块、成员或连接后，运行 `node scripts/panorama.mjs`，再跑检查。
+5. 改了模块、成员或连接后，运行 `node scripts/panorama.mjs`，再跑检查。示例运行：`node implementation/run.mjs "一月。二月。三月。"`。
 
 任务开始先读 [方法首页](template/methodology/README.md)，按任务类型查看设计、实施或验收指引。使用其他智能体时，在该客户端支持的项目入口引用同一首页；不能假定所有客户端都会自动读取 AGENTS.md。
 
 ## 改造已有项目
 
-已有项目也可以按框架改造，但动手前先列一份搬迁方案给用户看（哪些东西挪到哪、哪些不动），用户同意后再改。具体做法见 `template/AGENTS.md` 的「收纳」（迁移时先改位置表、不新建同名目录）和「版本管理」（动手前先提交一次）两节。
+已有项目改造前，先说明迁移范围、保留数据与恢复方式，征得用户同意。升级比较旧模板、新模板、当前项目，保留配置及用户偏好，冲突先问；不直接覆盖。
+
+新版工具兼容旧根格式：没有 module.json 时仍按原 TREE.md 与模块 README 检查。整套采用 scripts/，不要只复制一个入口；不自动迁移旧模块，不同步其他项目。具体见 [实施指引](template/methodology/implementation.md)。
 
 ## 反馈
 
