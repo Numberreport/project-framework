@@ -10,6 +10,7 @@ AI 项目通用框架模板：用模块、信息流和检查脚本组织项目�
 2. 改 `AGENTS.md`：标题换成项目名，补「使用说明」「维护窗口」。
 3. 按实际目录改 `TREE.md` 的「位置」表，删掉或替换 `_example` 示例模块。
 4. 在新项目里 `git init`，跑 `node scripts/check.mjs --verify`（需要 Node 18+）。
+5. 模板示例含「项目全景」。改了模块、成员或连接后，运行 `node scripts/panorama.mjs`，再跑检查。
 
 ## 改造已有项目
 

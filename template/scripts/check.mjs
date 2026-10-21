@@ -576,6 +576,34 @@ if (pendingDeletes.length) {
   warnings.push(`待删待确认：${pendingDeletes.join('、')}`);
 }
 
+// 项目全景：声明了就要和登记同步。阈值在 panorama.mjs，这里只在脚本缺失时兜底。
+const panoramaScript = join(root, 'scripts/panorama.mjs');
+if (!existsSync(panoramaScript)) {
+  if ('项目全景' in treeSections) add('声明了项目全景，但缺少 scripts/panorama.mjs');
+  else if (combos.size > 0 || rows.length > 8) {
+    warnings.push('建议补项目全景：有组合或模块超过 8 个。写在 TREE.md「模块」之前，再运行 node scripts/panorama.mjs');
+  }
+} else {
+  const panorama = spawnSync(process.execPath, [panoramaScript, '--check'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: VERIFY_TIMEOUT_MS,
+  });
+  if (panorama.error) {
+    add(`项目全景检查无法执行：${panorama.error.message}`);
+  } else if (panorama.status !== 0) {
+    const output = `${panorama.stderr || ''}${panorama.stdout || ''}`.trim();
+    const lines = output
+      ? output.split(/\r?\n/).map((line) => line.replace(/^✗\s*/, '').trim()).filter(Boolean)
+      : ['项目全景检查失败'];
+    for (const line of lines) add(line);
+  } else if ((panorama.stdout || '').trim()) {
+    for (const line of panorama.stdout.trim().split(/\r?\n/)) {
+      if (line.trim()) warnings.push(line.trim());
+    }
+  }
+}
+
 if (errors.length) {
   for (const error of errors) console.error(`✗ ${error}`);
   console.error(`\n${errors.length} 处问题`);
