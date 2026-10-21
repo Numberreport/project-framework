@@ -1,6 +1,7 @@
 # <项目名>
 
 > 开工先读 TREE.md。
+> 每次任务先读 [方法首页](methodology/README.md)，再按任务类型读相关章节；内容变化后重读。无法读取时说明影响，停止依赖缺失内容的操作。
 > 开工先跑 `node scripts/check.mjs`，收尾跑 `node scripts/check.mjs --verify`；警告当场处理或记进 tasks.json。
 > 工具脚本需要 Node 18 或更高版本。
 
