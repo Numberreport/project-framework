@@ -26,8 +26,6 @@
 
 ## 反馈
 
-框架规则不顺手、互相矛盾、检查误报漏报，或缺了该有的规定，提一份反馈交回模板维护者。
+使用框架有意见，可以在对话中说“反馈框架问题”，由 [框架反馈模块](template/modules/framework_feedback/README.md) 整理并提交；也可直接使用 [GitHub 反馈表单](https://github.com/Numberreport/project-framework/issues/new?template=framework-feedback.yml)。只反馈通用框架，项目功能问题仍由各项目处理。
 
-- 先问用户同不同意；同意后到本仓库 [Issues](https://github.com/Numberreport/project-framework/issues/new?template=framework-feedback.yml) 用「框架反馈」模板提 Issue，一件事一个，保持简短。用户不同意就不提。
-- 仓库是公开的，Issue 里不写账号、密钥、个人信息或项目隐私。
-- 用不了 GitHub 的，把反馈要点告诉用户，由用户转交。
+默认先确认。使用者明确开启指定范围的自动反馈后，可免逐条确认；仍需核对隐私、授权和重复问题。工具不可用时交付草稿，不伪装提交成功。具体流程和设置只在模块维护。

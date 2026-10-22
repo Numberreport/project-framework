@@ -1,0 +1,9 @@
+{
+  "id": "framework-feedback",
+  "name": "框架反馈",
+  "template": {
+    "id": "project-framework",
+    "version": "2.0.0"
+  },
+  "status": "ready"
+}
