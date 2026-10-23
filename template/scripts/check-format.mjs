@@ -36,6 +36,22 @@ function checkLinks(dir) {
   }
 }
 checkLinks(root);
+// 根目录白名单：项目配套文件 + 模块目录；点文件跳过，工具文件与旧版 ROOT_IGNORED 保持一致。
+const ROOT_ALLOWED = new Set([
+  'AGENTS.md', 'TREE.md', 'README.md', 'scripts', 'methodology', 'modules', 'settings', 'implementation',
+  'connections.json', 'module.json', 'INPUT.md', 'OUTPUT.md', 'PROCESS.md', 'VALIDATION.md',
+  'knowledge', 'runs', 'outputs',
+]);
+const ROOT_IGNORED = new Set([
+  'node_modules', 'dist', 'build', '__pycache__', 'venv',
+  'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+  'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'Makefile',
+  'Thumbs.db', 'desktop.ini',
+]);
+for (const entry of readdirSync(root)) {
+  if (entry.startsWith('.') || ROOT_ALLOWED.has(entry) || ROOT_IGNORED.has(entry)) continue;
+  errors.push(`计划外的文件和目录：${entry}（先确认是不是密钥；不是再放进登记的目录）`);
+}
 const panorama = spawnSync(process.execPath, [join(root, 'scripts/panorama.mjs'), '--check'], { encoding: 'utf8', timeout: 60000 });
 if (panorama.status !== 0 || panorama.error) errors.push('项目全景检查失败：' + (panorama.stderr || panorama.error?.message));
 else if (panorama.stdout.trim()) console.log(panorama.stdout.trim());

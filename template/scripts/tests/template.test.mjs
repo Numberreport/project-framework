@@ -46,6 +46,12 @@ test('成员验收失败不执行组合验收', () => fixture(p => { writeFileSy
 test('全景变旧与文件缺失', () => fixture(p => { edit(p, 'module.json', d => d.name = '改名'); bad(p, /全景未同步/); assert.equal(run(p, 'scripts/panorama.mjs').code, 0); assert.equal(run(p).code, 0); unlinkSync(join(p, 'methodology/overview.svg')); bad(p, /全景未同步/); }));
 test('没有全景声明只提示，不伪造或写入', () => fixture(p => { const path = join(p, 'TREE.md'); writeFileSync(path, readFileSync(path, 'utf8').split('## 项目全景')[0]); const r = run(p); assert.equal(r.code, 0, r.text); assert.match(r.text, /建议.*全景/); }));
 test('文档坏链接', () => fixture(p => { writeFileSync(join(p, 'README.md'), '[坏链接](missing.md)'); bad(p, /文档链接缺失/); }));
+test('根目录计划外文件报错，移走后恢复通过', () => fixture(p => {
+  writeFileSync(join(p, 'secrets.txt'), 'token');
+  bad(p, /计划外的文件和目录：secrets\.txt（先确认是不是密钥/);
+  unlinkSync(join(p, 'secrets.txt'));
+  const r = run(p); assert.equal(r.code, 0, r.text);
+}));
 test('待配置模块直接启动也会拒绝', () => fixture(p => { edit(p, leaf + '/module.json', d => d.status = 'pending'); const r = run(p, 'implementation/run.mjs', ['文字。']); assert.notEqual(r.code, 0); assert.match(r.text, /待配置，不得运行/); }));
 test('目录联接不能把外部目录当成员', () => fixture(p => {
   const external = join(dirname(p), 'outside');
