@@ -5,7 +5,7 @@
 
 ## 使用说明
 
-项目由模块构成，可以有多个任务入口；当前模板的项目根目录采用组合结构。输入、输出、处理流程分别见 [INPUT.md](INPUT.md)、[OUTPUT.md](OUTPUT.md)、[PROCESS.md](PROCESS.md)。命令和状态、设置、失败、保存、更新的共同执行方法见 [运行与维护](methodology/operation.md)，文件与格式见 [模块模板](methodology/module-template.md)。任务开始先明确目标位置、输入及本次要求。
+项目由模块构成。多个任务入口的配置见 [模块模板](methodology/module-template.md#多个任务入口)。输入、输出、处理流程分别见 [INPUT.md](INPUT.md)、[OUTPUT.md](OUTPUT.md)、[PROCESS.md](PROCESS.md)。命令和状态、设置、失败、保存、更新的共同执行方法见 [运行与维护](methodology/operation.md)，文件与格式见 [模块模板](methodology/module-template.md)。任务开始先明确目标位置、输入及本次要求。
 
 ## 收纳
 
