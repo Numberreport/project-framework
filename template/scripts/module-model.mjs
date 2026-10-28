@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { join, relative, isAbsolute } from 'node:path';
 export const REQUIRED = ['README.md', 'INPUT.md', 'OUTPUT.md', 'PROCESS.md', 'VALIDATION.md', 'settings/DEFAULTS.md', 'settings/PREFERENCES.md'];
 export const inside = (base, target) => { const r = relative(base, target); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
-export function load(root) {
+export function load(root, overrides = new Map()) {
   const errors = [], nodes = [], ids = new Set(), paths = new Set();
   const fail = (message) => errors.push(message);
   const text = p => readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
@@ -43,7 +43,7 @@ export function load(root) {
         const child = visit(path);
         if (child) node.children.push(child);
       }
-      const links = json(join(dir, 'connections.json'));
+      const links = overrides.has(label) ? overrides.get(label) : json(join(dir, 'connections.json'));
       if (!Array.isArray(links?.connections)) fail('connections.json 缺 connections 数组：' + label);
       else node.links = links.connections;
       const children = new Set(node.children.map(n => n.meta.id));

@@ -22,4 +22,6 @@
 
 [详细说明](methodology/panorama.md)
 
+[可编辑画布使用说明](methodology/canvas.md)：运行 `node scripts/canvas-server.mjs`，在本机浏览器拖线编辑连接。
+
 从实际模块和连接生成。结构变化后运行 `node scripts/panorama.mjs`，再运行检查。
