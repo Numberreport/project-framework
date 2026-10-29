@@ -18,10 +18,12 @@
 
 ## 项目全景
 
+属 [方法首页 · 三层可视化](methodology/README.md#三层可视化) 的**第二层（底层结构可视化）**：方便开发者看清结构与连接，不面向最终用户。
+
 [概览](methodology/overview.svg)
 
 [详细说明](methodology/panorama.md)
 
-[可编辑画布使用说明](methodology/canvas.md)：运行 `node scripts/canvas-server.mjs`，在本机浏览器拖线编辑连接。
+[可编辑画布使用说明](methodology/canvas.md)：运行 `node scripts/canvas-server.mjs`，在本机浏览器拖线编辑连接（第二层）。
 
 从实际模块和连接生成。结构变化后运行 `node scripts/panorama.mjs`，再运行检查。
