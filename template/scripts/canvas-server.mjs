@@ -6,6 +6,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { load, inside } from './module-model.mjs';
 import { writePorts } from './module-ports.mjs';
+import { planPack, applyPack } from './canvas-pack.mjs';
 
 const hash = text => createHash('sha256').update(text).digest('hex');
 export function createCanvasServer(root) {
@@ -53,13 +54,20 @@ export function createCanvasServer(root) {
       if (req.headers['x-canvas-token'] !== token) { res.writeHead(403).end(); return; }
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       if (req.method === 'GET' && req.url === '/api/project') { res.end(JSON.stringify(snapshot())); return; }
-      if (req.method !== 'POST' || req.url !== '/api/save') { res.writeHead(404).end(); return; }
+      if (req.method !== 'POST' || !['/api/save', '/api/pack-preview', '/api/pack'].includes(req.url)) { res.writeHead(404).end(); return; }
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 1000000) throw Error('保存内容过大'); }
       const data = JSON.parse(body), current = snapshot();
       const node = current.nodes.find(n => n.id === data.id && n.document);
       if (!node) throw Error('请选择组合模块');
       if (node.revision !== data.revision || current.layoutRevision !== data.layoutRevision) { res.writeHead(409).end(JSON.stringify({ error: '文件已被其他操作修改，请重新加载后再编辑。' })); return; }
+      if (req.url !== '/api/save') {
+        const plan = planPack(root, data, current);
+        if (req.url === '/api/pack-preview') { res.end(JSON.stringify(plan.summary)); return; }
+        if (data.packRevision !== plan.revision) { res.writeHead(409).end(JSON.stringify({ error: '打包预览已过期，请重新加载并预览。' })); return; }
+        applyPack(root, plan);
+        res.end(JSON.stringify(snapshot())); return;
+      }
       const document = { ...node.document, connections: data.connections };
       if (typeof data.stop !== 'string') throw Error('停止条件格式无效');
       if (data.stop.trim()) document.stop = data.stop; else delete document.stop;

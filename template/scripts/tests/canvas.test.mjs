@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, cpSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { createCanvasServer } from '../canvas-server.mjs';
 import { readPorts, writePorts } from '../module-ports.mjs';
 import { load } from '../module-model.mjs';
@@ -10,7 +10,7 @@ import { load } from '../module-model.mjs';
 test('画布保存、冲突、非法连接及回滚', async () => {
   const temp = mkdtempSync(join(tmpdir(), 'framework-canvas-'));
   const root = join(temp, 'project');
-  cpSync(new URL('../../', import.meta.url), root, { recursive: true });
+  cpSync(new URL('../../', import.meta.url), root, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules'].includes(basename(path)) });
   const server = createCanvasServer(root);
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const url = 'http://127.0.0.1:' + server.address().port;
@@ -47,7 +47,7 @@ test('画布保存、冲突、非法连接及回滚', async () => {
 
 test('多个输入输出、零接口、连接约束、冲突与接口回滚', async () => {
   const temp = mkdtempSync(join(tmpdir(), 'framework-ports-')), root = join(temp, 'project');
-  cpSync(new URL('../../', import.meta.url), root, { recursive: true });
+  cpSync(new URL('../../', import.meta.url), root, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules'].includes(basename(path)) });
   const server = createCanvasServer(root);
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const url = 'http://127.0.0.1:' + server.address().port;

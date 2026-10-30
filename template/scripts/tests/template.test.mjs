@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, unlinkSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 const source = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -10,7 +10,7 @@ const leaf = 'modules/_example_combo/modules/_example';
 function fixture(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-v2-test-'));
   const project = join(dir, 'project');
-  try { cpSync(source, project, { recursive: true }); fn(project); }
+  try { cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules'].includes(basename(path)) }); fn(project); }
   finally {
     // dir 是本测试刚创建的专用临时目录，绝不对来源目录操作。
     assert.equal(dirname(dir), tmpdir());
