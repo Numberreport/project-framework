@@ -26,6 +26,15 @@ export function load(root, overrides = new Map(), sources = new Map()) {
       if (!existsSync(target) || !statSync(target).isFile() || !inside(real, realpathSync(target))) fail('配套文件缺失或越界：' + label + '/' + file);
       else if (!text(target).trim() || /<待填写>/.test(text(target))) fail('配套内容未完成：' + label + '/' + file);
     }
+    if (meta.processor !== undefined && !['program', 'ai', 'mixed'].includes(meta.processor)) fail('processor 无效：' + label);
+    if (meta.implementation !== undefined) {
+      const entry = meta.implementation;
+      if (typeof entry !== 'string' || !/^implementation\/(?:[A-Za-z0-9_\-\u0080-\uffff]+\/)*[A-Za-z0-9_\-\u0080-\uffff][A-Za-z0-9_.\-\u0080-\uffff]*$/.test(entry)) fail('implementation 路径无效：' + label);
+      else {
+        const target = join(dir, entry), base = join(dir, 'implementation');
+        if (!existsSync(target) || !statSync(target).isFile() || !inside(real, realpathSync(target)) || !inside(realpathSync(base), realpathSync(target))) fail('implementation 文件缺失或实际路径越界：' + label);
+      }
+    }
     const hasMembers = existsSync(join(dir, 'modules'));
     const hasLinks = existsSync(join(dir, 'connections.json'));
     if (hasMembers !== hasLinks) fail('组合须同时具备 modules/ 和 connections.json：' + label);
@@ -63,6 +72,7 @@ export function load(root, overrides = new Map(), sources = new Map()) {
           const direction = end?.module === '$self' ? (side === 'from' ? 'inputs' : 'outputs') : (side === 'from' ? 'outputs' : 'inputs');
           if (owner?.[direction] && !owner[direction].some(p => p.name === end?.port)) fail('连接引用未定义接口：' + label + '/' + end.module + '.' + end.port);
         }
+        if (edge.kind !== undefined && !['support', 'return'].includes(edge.kind)) fail('连接 kind 无效：' + label);
         if (typeof edge.info !== 'string' || !edge.info.trim()) fail('连接未说明传递信息：' + label);
         if (edge.when !== undefined && (typeof edge.when !== 'string' || !edge.when.trim())) fail('连接条件无效：' + label);
         if (edge.from?.module !== '$self' && edge.to?.module !== '$self') {

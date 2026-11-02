@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { POSITION_LIMIT, displayIds } from './canvas-layout.mjs';
 import { load, inside } from './module-model.mjs';
 import { writePorts } from './module-ports.mjs';
 import { planPack, applyPack } from './canvas-pack.mjs';
@@ -31,7 +32,20 @@ export function createCanvasServer(root) {
         }
         return [...names].map(name => ({ name, description: '要求见本文件正文' }));
       }
+      const documents = Object.fromEntries(['README.md', 'INPUT.md', 'PROCESS.md', 'OUTPUT.md', 'VALIDATION.md'].map(file => {
+        const path = join(n.dir, file); safe(path);
+        return [file, { path, actualPath: realpathSync(path), content: readFileSync(path, 'utf8') }];
+      }));
+      const responsibility = documents['README.md'].content.match(/^##[ \t]+职责[ \t]*\r?\n([\s\S]*?)(?=^##[ \t]|$(?![\s\S]))/m)?.[1].trim() || '';
+      const locate = entry => {
+        if (!entry || typeof entry !== 'string') return null;
+        const path = join(n.dir, entry); safe(path);
+        return { path, actualPath: existsSync(path) ? realpathSync(path) : null };
+      };
       return { id: n.meta.id, name: n.meta.name, label: n.label, children: n.children.map(c => c.meta.id),
+        documents, responsibility, summary: responsibility.split(/\r?\n\s*\r?\n/)[0], processor: n.meta.processor ?? null,
+        implementation: locate(n.meta.implementation), verify: locate(n.meta.verify),
+        settings: ['DEFAULTS.md', 'PREFERENCES.md'].map(file => locate('settings/' + file)),
         input, output, inputs: inferred('inputs', input), outputs: inferred('outputs', output), interfaceRevision: hash(input + '\0' + output),
         document: raw ? JSON.parse(raw) : null, revision: raw ? hash(raw) : null };
     }) };
@@ -50,6 +64,10 @@ export function createCanvasServer(root) {
       if (req.method === 'GET' && req.url === '/') {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.end(readFileSync(new URL('./canvas.html', import.meta.url), 'utf8').replace('__TOKEN__', token)); return;
+      }
+      if (req.method === 'GET' && req.url === '/canvas-layout.mjs') {
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(readFileSync(new URL('./canvas-layout.mjs', import.meta.url))); return;
       }
       if (req.headers['x-canvas-token'] !== token) { res.writeHead(403).end(); return; }
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -87,9 +105,10 @@ export function createCanvasServer(root) {
       const checked = load(root, new Map([[node.label, document]]), sources);
       if (checked.errors.length) throw Error(checked.errors.join('\n'));
       if (!data.positions || typeof data.positions !== 'object' || Array.isArray(data.positions)) throw Error('节点位置无效');
-      const allowed = new Set(['$input', '$output', ...node.children]);
+      const ownPorts = changes.find(c => c.id === node.id) || node;
+      const allowed = new Set(['$input', '$output', ...displayIds(node.children, ownPorts.inputs, ownPorts.outputs, data.connections)]);
       for (const [id, p] of Object.entries(data.positions)) {
-        if (!allowed.has(id) || !p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.y < 0 || p.x > 20000 || p.y > 20000) throw Error('节点位置无效');
+        if (!allowed.has(id) || !p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.y < 0 || p.x > POSITION_LIMIT || p.y > POSITION_LIMIT) throw Error('节点位置无效');
       }
       const layout = { ...current.layout, [node.id]: data.positions };
       const targetNode = checked.nodes.find(n => n.meta.id === node.id);

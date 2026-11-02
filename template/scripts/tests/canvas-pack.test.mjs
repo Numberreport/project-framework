@@ -88,16 +88,18 @@ function basics(root, edges) {
 const edge = (from, to, extra = {}) => ({ from: { module: from, port: 'text' }, to: { module: to, port: 'text' }, info: from + ' to ' + to, ...extra });
 
 test('多个基础节点打包保留内部连接、条件及扩展字段；支持再次嵌套打包', async () => fixture(async ({ root, get, request, preview, post }) => {
-  const edges = [edge('$self', 'a', { when: '任务一', tag: { keep: true } }), edge('a', 'b', { when: '处理成功' }), edge('b', 'c'), edge('c', '$self')];
+  const edges = [edge('$self', 'a', { when: '任务一', kind: 'support', tag: { keep: true } }), edge('a', 'b', { when: '处理成功' }), edge('b', 'c'), edge('c', '$self')];
   basics(root, edges);
   let data = await request({ members: ['a', 'b'] }), p = await preview(data);
   assert.deepEqual(p.inner.connections[1], edges[1]);
   assert.equal(p.outer.custom, '保留文档字段');
   assert.deepEqual(p.outer.connections[0].tag, { keep: true });
   assert.equal(p.inner.connections[0].when, '任务一');
+  assert.equal(p.inner.connections[0].kind, 'support');
+  assert.equal(p.outer.connections[0].kind, 'support');
   let response = await post('pack', { ...data, packRevision: p.revision });
   assert.equal(response.status, 200, await response.text());
-  assert.deepEqual((await get()).layout['project-example'].c, { x: 895, y: 250 });
+  assert.deepEqual((await get()).layout['project-example'].c, { x: 1060, y: 60 });
   data = await request({ members: ['packed', 'c'], newId: 'nested' }); p = await preview(data);
   response = await post('pack', { ...data, packRevision: p.revision });
   assert.equal(response.status, 200, await response.text());
