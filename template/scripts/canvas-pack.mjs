@@ -119,7 +119,7 @@ export function planPack(root, data, current) {
   add(join(parent.dir, 'connections.json'), json({ ...oldDocument, connections: outer }));
   add(join(destination, 'module.json'), json({ id: data.newId, name, template: { id: 'project-framework', version: '2.0.0' }, status: 'pending' }));
   add(join(destination, 'connections.json'), json(document));
-  add(join(destination, 'README.md'), '# ' + name + '\n\n## 职责\n\n组织本组合的内部成员，按对外接口接收和交付材料；具体业务职责与边界须由维护者确认补齐，不代替成员的处理职责。\n\n## 使用说明\n\n由画布打包已有模块形成，成员及连接见 modules/ 和 connections.json。当前待配置：核对流程、路径引用、接口条件和检验标准后，才可改为 ready。画布不生成运行入口。\n');
+  add(join(destination, 'README.md'), '# ' + name + '\n\n## 职责\n\n组织本组合的内部成员，按对外接口接收和交付材料；具体业务职责须由维护者确认补齐。\n\n## 使用说明\n\n由画布打包已有模块形成，成员及连接见 modules/ 和 connections.json。当前待配置：核对流程、路径引用、接口条件和检验标准后，才可改为 ready。画布不生成运行入口。\n');
   add(join(destination, 'INPUT.md'), writePorts('# 输入\n\n按 connections.json 交给内部成员；要求沿用对应成员接口。\n', inputs));
   add(join(destination, 'OUTPUT.md'), writePorts('# 输出\n\n按 connections.json 接收内部成员输出；要求沿用对应成员接口。\n', outputs));
   add(join(destination, 'PROCESS.md'), '# 处理流程\n\n按 connections.json 传递输入和输出，保留各连线的适用条件。成员失败时暂停依赖项。存在反馈时遵守 connections.json 的 stop。\n\n运行前须核对原入口、计算路径、任务选择和人工确认步骤；补齐实际调用方式。打包不会授予额外权限，也不会执行成员。\n');
