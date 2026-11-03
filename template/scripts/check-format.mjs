@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { load, inside } from './module-model.mjs';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { nodes, errors } = load(root);
-const required = ['AGENTS.md', 'TREE.md', 'methodology/README.md', 'methodology/design.md', 'methodology/implementation.md', 'methodology/acceptance.md', 'methodology/module-template.md', 'methodology/CONFIG_VALIDATION.md', 'methodology/operation.md'];
+const required = ['AGENTS.md', 'TREE.md', 'methodology/README.md', 'methodology/implementation.md', 'methodology/acceptance.md', 'methodology/module-template.md', 'methodology/CONFIG_VALIDATION.md', 'methodology/operation.md'];
 for (const file of required) if (!existsSync(join(root, file))) errors.push('缺少项目入口：' + file);
 const commands = new Map();
 for (const node of nodes) {

@@ -7,7 +7,7 @@
 ## 怎么用
 
 1. 把 `template/` 里的全部内容（含 `.gitignore`、`.gitattributes`）复制到新项目根目录。
-2. 先读 [方法首页](template/methodology/README.md)，按任务查阅设计、实施或验收；文件格式见 [模块模板](template/methodology/module-template.md)。
+2. 先读 [方法首页](template/methodology/README.md)，在首页了解模块拆分与组合，再按任务查阅实施或验收；文件格式见 [模块模板](template/methodology/module-template.md)。
 3. 按模块模板修改各位置配套文件；新位置用新标识，先设为 pending，审阅后改为 ready。
 4. 在新项目里 `git init`，跑 `node scripts/check.mjs --verify`（需要 Node 18+）。
 5. 改了模块、成员或连接后，运行 `node scripts/panorama.mjs`，再跑检查。示例：`node implementation/run.mjs "一月。二月。三月。"`。
