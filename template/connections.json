@@ -1,5 +1,26 @@
 {
   "connections": [
-    { "from": { "module": "framework_feedback", "port": "result" }, "to": { "module": "$self", "port": "result" }, "info": "反馈处理结果：链接、草稿或原因" }
+    {
+      "from": {
+        "module": "framework_feedback",
+        "port": "result"
+      },
+      "to": {
+        "module": "$self",
+        "port": "result"
+      },
+      "info": "反馈处理结果：链接、草稿或原因"
+    },
+    {
+      "from": {
+        "module": "$self",
+        "port": "feedback"
+      },
+      "to": {
+        "module": "framework_feedback",
+        "port": "feedback"
+      },
+      "info": "一项通用框架的问题或建议"
+    }
   ]
 }

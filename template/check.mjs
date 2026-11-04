@@ -117,6 +117,14 @@ function visit(dir, ids, seen, parentLinks = []) {
     const child = visit(path, ids, seen, node.links);
     if (child) node.children.push(child);
   }
+  const ioNodes = data.ioNodes || [];
+  if (!Array.isArray(ioNodes)) fail('ioNodes 必须是数组：' + label);
+  else for (const io of ioNodes) {
+    if (!io || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(io.id || '') || ids.has(io.id) || !['input','output'].includes(io.type) || !io.name?.trim() || !io.description?.trim()) { fail('输入输出节点无效或标识重复：' + label); continue; }
+    ids.add(io.id);
+    const port = { name:'value', description:io.description };
+    node.children.push({ dir, label:label + '/' + io.id, meta:{ id:io.id,name:io.name,status:'ready' }, children:[],links:[],inputs:io.type === 'output' ? [port]:[],outputs:io.type === 'input' ? [port]:[], virtual:true });
+  }
   const childIds = new Set(node.children.map(n => n.meta.id));
   const adjacency = new Map();
   for (const edge of node.links) {
