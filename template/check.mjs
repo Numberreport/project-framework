@@ -3,7 +3,7 @@
 //
 //   node check.mjs              结构检查
 //   node check.mjs --verify     结构检查 + 各模块 module.json 里 verify 指定的维护验收
-//   node check.mjs --panorama   重新生成 README.md 里的项目全景
+//   node check.mjs --panorama   重新生成 AGENTS.md 里的项目结构
 //   node check.mjs --tree       打印模块清单
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, isAbsolute, dirname } from 'node:path';
@@ -55,7 +55,10 @@ function visit(dir, ids, seen, parentLinks = []) {
   if (meta.template?.id !== 'project-framework' || meta.template?.version !== VERSION) fail('模板版本不受支持：' + label + '（需要确认迁移，不能猜格式）');
   if (!['ready', 'pending'].includes(meta.status)) fail('配置状态须为 ready 或 pending：' + label);
 
-  for (const file of REQUIRED) {
+  // 项目自己的说明放在 AGENTS.md 里，模块用 README.md；两者都不必两处都有。
+  const isRoot = real === realpathSync(root);
+  const required = isRoot ? REQUIRED.filter(f => f !== 'README.md') : REQUIRED;
+  for (const file of required) {
     const path = join(dir, file);
     if (!existsSync(path) || !statSync(path).isFile() || !inside(real, realpathSync(path))) fail('缺少配套文件或路径越界：' + label + '/' + file);
     else if (!read(path).trim() || read(path).includes('<待填写>')) fail('配套文件没写完：' + label + '/' + file);
@@ -157,9 +160,9 @@ function checkLinks(dir) {
   }
 }
 
-// 项目全景：从模块和连接直接生成，嵌在 README.md 里。
+// 项目结构：从模块和连接直接生成，嵌在 AGENTS.md 的「项目结构」一节里。
 function renderPanorama(tree) {
-  const lines = ['## 项目全景', '', '> 由 `node check.mjs --panorama` 生成，别手改。只表示模块和连接，不表示执行顺序。', '', '### 模块', ''];
+  const lines = ['## 项目结构', '', '下面这段由 `node check.mjs --panorama` 生成，别手改。它只表示模块和连接，不表示执行顺序；执行顺序写在 `PROCESS.md` 里。改了模块或连接，重新生成一次。', '', '### 模块', ''];
   const walk = (node, depth) => {
     const name = node.meta.name + '（' + node.meta.id + '）';
     lines.push(depth ? '  '.repeat(depth) + '- ' + name + '：' + node.label : '- ' + name + '：根目录');
@@ -178,14 +181,14 @@ function renderPanorama(tree) {
   return lines.join('\n').trimEnd() + '\n';
 }
 
-const panoramaBlock = /^## 项目全景[^]*?(?=^## |(?![\s\S]))/m;
+const panoramaBlock = /^## 项目结构[^]*?(?=^## |(?![\s\S]))/m;
 
 const ids = new Set();
 const tree = visit(root, ids, new Set(), null);
 const all = tree ? [tree, ...walkAll(tree)] : [];
 
 // 根目录只放登记过的文件，防止临时文件、密钥混进来。
-const ROOT_ALLOWED = new Set(['AGENTS.md', 'README.md', 'METHOD.md', 'INPUT.md', 'OUTPUT.md', 'PROCESS.md', 'VALIDATION.md', 'SETTINGS.md', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas.mjs', 'canvas.html', 'canvas-layout.json', 'tests', 'knowledge', 'runs', 'outputs']);
+const ROOT_ALLOWED = new Set(['AGENTS.md', 'INPUT.md', 'OUTPUT.md', 'PROCESS.md', 'VALIDATION.md', 'SETTINGS.md', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas.mjs', 'canvas.html', 'canvas-layout.json', 'tests', 'knowledge', 'runs', 'outputs']);
 const ROOT_IGNORED = new Set(['node_modules', 'dist', 'build', '__pycache__', 'venv', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'Makefile', 'Thumbs.db', 'desktop.ini']);
 for (const entry of readdirSync(root)) {
   if (entry.startsWith('.') || ROOT_ALLOWED.has(entry) || ROOT_IGNORED.has(entry)) continue;
@@ -193,23 +196,23 @@ for (const entry of readdirSync(root)) {
 }
 checkLinks(root);
 
-const readmePath = join(root, 'README.md');
-const readme = existsSync(readmePath) ? read(readmePath) : '';
+const agentsPath = join(root, 'AGENTS.md');
+const agents = existsSync(agentsPath) ? read(agentsPath) : '';
 const panorama = tree ? renderPanorama(tree) : '';
 
 if (process.argv.includes('--panorama')) {
-  const text = panoramaBlock.test(readme)
-    ? readme.replace(panoramaBlock, panorama + '\n')
-    : readme.trimEnd() + '\n\n' + panorama + '\n';
-  writeFileSync(readmePath, text);
-  console.log('已更新 README.md 里的项目全景');
+  const text = panoramaBlock.test(agents)
+    ? agents.replace(panoramaBlock, panorama + '\n')
+    : agents.trimEnd() + '\n\n' + panorama + '\n';
+  writeFileSync(agentsPath, text);
+  console.log('已更新 AGENTS.md 里的项目结构');
   process.exit(0);
 }
-if (panorama && readme) {
-  const match = readme.match(panoramaBlock);
-  if (!match) fail('README.md 缺项目全景，运行 node check.mjs --panorama 生成');
-  else if (match[0].trimEnd() !== panorama.trimEnd()) fail('README.md 的项目全景已过期，运行 node check.mjs --panorama');
-} else if (tree) fail('README.md 缺失');
+if (panorama && agents) {
+  const match = agents.match(panoramaBlock);
+  if (!match) fail('AGENTS.md 缺项目结构，运行 node check.mjs --panorama 生成');
+  else if (match[0].trimEnd() !== panorama.trimEnd()) fail('AGENTS.md 的项目结构已过期，运行 node check.mjs --panorama');
+} else if (tree) fail('AGENTS.md 缺失');
 
 if (process.argv.includes('--tree')) for (const n of all) console.log((n.label === '.' ? '根目录' : n.label) + ' [' + n.meta.id + '] ' + n.meta.name);
 

@@ -1,6 +1,6 @@
 {
-  "id": "project-example",
-  "name": "示例项目",
+  "id": "project",
+  "name": "项目",
   "template": {
     "id": "project-framework",
     "version": "3.0.0"

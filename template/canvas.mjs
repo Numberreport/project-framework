@@ -57,8 +57,10 @@ function readLayout() {
   return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
 }
 
+// 根目录的说明在 AGENTS.md，模块的说明在各自的 README.md。
 function duties(node) {
-  const body = readText(join(node.dir, 'README.md')).match(/^##[ \t]*职责[ \t]*\r?\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1].trim() || '';
+  const file = node.dir === ROOT ? 'AGENTS.md' : 'README.md';
+  const body = readText(join(node.dir, file)).match(/^##[ \t]*职责[ \t]*\r?\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1].trim() || '';
   return body;
 }
 
@@ -190,8 +192,7 @@ export function applyPack(tree, plan) {
     if (!newParentLinks.some(x => sameEnds(x, e))) newParentLinks.push(e);
   }
 
-  const oldBase = join(plan.parentDir, 'modules');
-  const moves = plan.members.map(m => [join(oldBase, m.id), join(plan.targetDir, 'modules', m.id)]);
+  const moves = plan.members.map(m => [join(ROOT, m.from), join(ROOT, m.to)]);
   if (existsSync(plan.targetDir)) throw Error('目标目录已存在：' + rel(plan.targetDir));
 
   try {

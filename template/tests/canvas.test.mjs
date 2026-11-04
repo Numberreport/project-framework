@@ -26,11 +26,39 @@ try { await cases({ call, plain, base, token, project }); }
 finally { server.closeAllConnections?.(); server.close(); }
 `;
 
+// 模板不带示例模块；每个用例先建两个最小模块和连好它们，界面才有东西可看。
+const FILES = {
+  'INPUT.md': '# 输入要求\n\n接收一段文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n',
+  'OUTPUT.md': '# 输出要求\n\n返回处理后的文字。\n\n```interfaces\n[{ "name": "text", "description": "处理后的文字" }]\n```\n',
+  'README.md': '# 模块\n\n## 职责\n\n处理一段文字，交给下一个模块。\n',
+  'PROCESS.md': '# 处理流程\n\n1. 读取输入，处理一次，交出结果。\n',
+  'VALIDATION.md': '# 检验标准\n\n- 输出非空。\n',
+};
+function seed(project) {
+  for (const id of ['a', 'b']) {
+    const dir = join(project, 'modules', id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'module.json'), JSON.stringify({ id, name: id === 'a' ? '甲' : '乙', template: { id: 'project-framework', version: '3.0.0' }, status: 'ready' }, null, 2) + '\n');
+    for (const [file, text] of Object.entries(FILES)) writeFileSync(join(dir, file), text);
+  }
+  writeFileSync(join(project, 'INPUT.md'), FILES['INPUT.md']);
+  writeFileSync(join(project, 'OUTPUT.md'), '# 输出要求\n\n返回处理结果。\n\n```interfaces\n[{ "name": "result", "description": "处理结果" }]\n```\n');
+  writeFileSync(join(project, 'connections.json'), JSON.stringify({
+    connections: [
+      { from: { module: '$self', port: 'text' }, to: { module: 'a', port: 'text' }, info: '原始文字' },
+      { from: { module: 'a', port: 'text' }, to: { module: 'b', port: 'text' }, info: '中间结果' },
+      { from: { module: 'b', port: 'text' }, to: { module: '$self', port: 'result' }, info: '最终结果' },
+    ],
+  }, null, 2) + '\n');
+  spawnSync(process.execPath, [join(project, 'check.mjs'), '--panorama'], { encoding: 'utf8' });
+}
+
 function withCanvas(name, cases) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-canvas-'));
   const project = join(dir, 'project');
   try {
     cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git'].includes(basename(path)) });
+    seed(project);
     mkdirSync(join(project, 'tests'), { recursive: true }); writeFileSync(join(project, 'tests/case.mjs'), 'export default ' + cases.toString() + ';\n');
     writeFileSync(join(project, 'tests/run-canvas.mjs'), runner);
     const result = spawnSync(process.execPath, [join(project, 'tests/run-canvas.mjs'), project], { encoding: 'utf8', timeout: 120000 });
@@ -48,14 +76,14 @@ test('页面能打开，根目录作为一层显示三个成员', () => withCanv
   const data = await call('/api/project');
   if (!data.levels[data.root.id]) throw Error('根目录应作为一层');
   const count = data.levels[data.root.id].members.length;
-  if (count !== 3) throw Error('成员数应为 3，实际 ' + count);
+  if (count !== 3) throw Error('成员数应为 3（框架反馈 + 两个样本），实际 ' + count);
 }));
 
 test('能读到模块配套文件，读不到模块外', () => withCanvas('doc', async ({ call }) => {
-  const doc = await call('/api/doc?id=text_reorder&file=README.md');
-  if (!/文字重排/.test(doc.content)) throw Error('内容不对');
-  if (doc.path !== 'modules/text_reorder/README.md') throw Error('路径不对：' + doc.path);
-  const bad = await call('/api/doc?id=text_reorder&file=../../check.mjs');
+  const doc = await call('/api/doc?id=a&file=README.md');
+  if (!/职责/.test(doc.content)) throw Error('内容不对');
+  if (doc.path !== 'modules/a/README.md') throw Error('路径不对：' + doc.path);
+  const bad = await call('/api/doc?id=a&file=../../check.mjs');
   if (!bad.error) throw Error('不能读到模块外的文件');
 }));
 
@@ -70,11 +98,11 @@ test('保存连接、条件和节点位置', () => withCanvas('save', async ({ c
   const root = before.root.id;
   const links = JSON.parse(JSON.stringify(before.levels[root].links));
   links[0].when = '收到文字时';
-  const saved = await call('/api/save', { levelId: root, links, stop: before.levels[root].stop, positions: { text_reorder: { x: 10, y: 20 } }, revision: before.revisions[root] });
+  const saved = await call('/api/save', { levelId: root, links, stop: before.levels[root].stop, positions: { a: { x: 10, y: 20 } }, revision: before.revisions[root] });
   if (saved.error) throw Error(saved.error);
   const after = await call('/api/project');
   if (after.levels[root].links[0].when !== '收到文字时') throw Error('条件没写进去');
-  const pos = after.layout[root] && after.layout[root].text_reorder;
+  const pos = after.layout[root] && after.layout[root].a;
   if (!pos || pos.x !== 10 || pos.y !== 20) throw Error('位置没存');
 }));
 
@@ -82,7 +110,10 @@ test('文件被别的操作改过时拒绝覆盖', () => withCanvas('conflict', 
   const before = await call('/api/project');
   const root = before.root.id;
   const stale = before.revisions[root];
-  await call('/api/save', { levelId: root, links: before.levels[root].links, stop: '', positions: {}, revision: stale });
+  // 第一次保存改了文件，传入的 revision 就过期了；再拿它保存必须被拒绝。
+  const links = JSON.parse(JSON.stringify(before.levels[root].links));
+  links[0].when = '第一次';
+  await call('/api/save', { levelId: root, links, stop: '', positions: {}, revision: stale });
   const again = await call('/api/save', { levelId: root, links: before.levels[root].links, stop: '', positions: {}, revision: stale });
   if (!/重新加载/.test(again.error || '')) throw Error('应拒绝覆盖，实际：' + (again.error || '通过了'));
 }));
@@ -99,32 +130,34 @@ test('连接不存在的接口会被拒绝', () => withCanvas('badport', async (
 test('打包：预览不写盘，确认后搬家、生成组合、改链接', () => withCanvas('pack', async ({ call, project }) => {
   const fs = await import('node:fs'); const pjoin = (await import('node:path')).join;
   const before = await call('/api/project');
-  const body = { parentId: before.root.id, memberIds: ['text_reorder', 'text_checker'], id: 'text_flow', name: '文字处理组合' };
+  const body = { parentId: before.root.id, memberIds: ['a', 'b'], id: 'flow', name: '组合' };
   const preview = await call('/api/pack-preview', body);
   if (preview.error) throw Error(preview.error);
   if (preview.move.length !== 2) throw Error('应移动两个模块');
-  if (preview.inputs.map(p => p.name).join() !== 'text,original') throw Error('输入接口不对');
-  if (preview.outputs.map(p => p.name).join() !== 'result') throw Error('输出接口不对');
-  if (!fs.existsSync(pjoin(project, 'modules/text_reorder/run.mjs'))) throw Error('预览不该动文件');
-  if (fs.existsSync(pjoin(project, 'modules/text_flow'))) throw Error('预览不该建目录');
+  if (preview.inputs.map(p => p.name).join() !== 'text') throw Error('输入接口不对');
+  if (preview.outputs.map(p => p.name).join() !== 'text') throw Error('输出接口不对');
+  if (!fs.existsSync(pjoin(project, 'modules/a/README.md'))) throw Error('预览不该动文件');
+  if (fs.existsSync(pjoin(project, 'modules/flow'))) throw Error('预览不该建目录');
 
   const done = await call('/api/pack', body);
   if (done.error) throw Error(done.error);
-  if (done.links.length !== 3) throw Error('应改 3 处链接，实际 ' + done.links.length);
-  if (fs.existsSync(pjoin(project, 'modules/text_reorder'))) throw Error('旧目录应已移走');
-  const readme = fs.readFileSync(pjoin(project, 'modules/text_flow/modules/text_reorder/README.md'), 'utf8');
-  if (!readme.includes('../../../../METHOD.md')) throw Error('链接没改对：' + readme.match(/\]\(([^)]+METHOD[^)]*)\)/));
+  // 两个模块一起搬进新组合，它们之间的相对位置没变，链接原样保留，不用改。
+  if (done.links.length !== 0) throw Error('不该改链接，实际 ' + JSON.stringify(done.links));
+  if (fs.existsSync(pjoin(project, 'modules/a'))) throw Error('旧目录应已移走');
+  const readme = fs.readFileSync(pjoin(project, 'modules/flow/modules/b/README.md'), 'utf8');
+  if (!readme.includes('## 职责')) throw Error('内容被改坏了');
+  if (!fs.existsSync(pjoin(project, 'modules/flow/modules/a/README.md'))) throw Error('成员应在组合里');
 
   const after = await call('/api/project');
   const root = after.levels[after.root.id];
-  if (!root.members.some(m => m.id === 'text_flow')) throw Error('根目录应有新组合');
-  if (root.members.some(m => m.id === 'text_reorder')) throw Error('成员应已移入组合');
-  if (after.levels.text_flow.links.length !== 1) throw Error('内部连接应保留 1 条');
+  if (!root.members.some(m => m.id === 'flow')) throw Error('根目录应有新组合');
+  if (root.members.some(m => m.id === 'a')) throw Error('成员应已移入组合');
+  if (after.levels.flow.links.length !== 1) throw Error('内部连接应保留 1 条');
 }));
 
 test('打包后通过结构检查', () => withCanvas('packcheck', async ({ call, project }) => {
   const before = await call('/api/project');
-  const done = await call('/api/pack', { parentId: before.root.id, memberIds: ['text_reorder', 'text_checker'], id: 'text_flow', name: '文字处理组合' });
+  const done = await call('/api/pack', { parentId: before.root.id, memberIds: ['a', 'b'], id: 'flow', name: '组合' });
   if (done.error) throw Error(done.error);
   const { spawnSync } = await import('node:child_process');
   const pjoin = (await import('node:path')).join;
@@ -139,9 +172,9 @@ test('打包后通过结构检查', () => withCanvas('packcheck', async ({ call,
 test('选不够或标识撞名时不做改动', () => withCanvas('refuse', async ({ call, project }) => {
   const fs = await import('node:fs'); const pjoin = (await import('node:path')).join;
   const before = await call('/api/project');
-  const conflict = await call('/api/pack-preview', { parentId: before.root.id, memberIds: ['text_reorder', 'text_checker'], id: 'framework_feedback', name: '撞名' });
+  const conflict = await call('/api/pack-preview', { parentId: before.root.id, memberIds: ['a', 'b'], id: 'framework_feedback', name: '撞名' });
   if (!/已被占用/.test(conflict.error || '')) throw Error('应拒绝撞名');
-  const one = await call('/api/pack-preview', { parentId: before.root.id, memberIds: ['text_reorder'], id: 'x', name: '一个' });
+  const one = await call('/api/pack-preview', { parentId: before.root.id, memberIds: ['a'], id: 'x', name: '一个' });
   if (!/至少选两个/.test(one.error || '')) throw Error('应拒绝只选一个');
-  if (!fs.existsSync(pjoin(project, 'modules/text_reorder/run.mjs'))) throw Error('不该动文件');
+  if (!fs.existsSync(pjoin(project, 'modules/a/README.md'))) throw Error('不该动文件');
 }));

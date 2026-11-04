@@ -1,7 +1,6 @@
 # 框架反馈
 
 - [输入](INPUT.md)、[输出](OUTPUT.md)、[处理流程](PROCESS.md)、[检验标准](VALIDATION.md)、[设置](SETTINGS.md)、[智能体操作指引](implementation/instructions.md)。
-- 通用方法见 [项目方法](../../METHOD.md)。
 
 ## 职责
 
