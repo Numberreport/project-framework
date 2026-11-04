@@ -27,22 +27,26 @@ finally { server.closeAllConnections?.(); server.close(); }
 `;
 
 // 模板不带示例模块；每个用例先建两个最小模块和连好它们，界面才有东西可看。
-const FILES = {
-  'INPUT.md': '# 输入要求\n\n接收一段文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n',
-  'OUTPUT.md': '# 输出要求\n\n返回处理后的文字。\n\n```interfaces\n[{ "name": "text", "description": "处理后的文字" }]\n```\n',
-  'README.md': '# 模块\n\n## 职责\n\n处理一段文字，交给下一个模块。\n',
-  'PROCESS.md': '# 处理流程\n\n1. 读取输入，处理一次，交出结果。\n',
-  'VALIDATION.md': '# 检验标准\n\n- 输出非空。\n',
-};
+// 模块写 README（四段，接口分两条）和 VALIDATION.md。
+const README = '# 模块\n\n## 职责\n\n处理一段文字，交给下一个模块。\n\n' +
+  '## 输入\n\n接收 text：待处理的文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n\n' +
+  '## 输出\n\n交付 text：处理后的文字。\n\n```interfaces\n[{ "name": "text", "description": "处理后的文字" }]\n```\n\n' +
+  '## 处理流程\n\n1. 读取输入，处理一次，交出结果。\n\n## 没完成时\n\n缺材料就停下来问，说清卡在哪。\n';
+const VALIDATION = '# 检查标准\n\n- 输出非空。\n';
+// 根目录的 README 和模块一样五段齐全，接口分「输入」「输出」两块。
+const ROOT_README = '# 项目\n\n## 职责\n\n把输入经两个模块处理后交回。\n\n' +
+  '## 输入\n\n接收 text：待处理的文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n\n' +
+  '## 输出\n\n交付 result：处理结果。\n\n```interfaces\n[{ "name": "result", "description": "处理结果" }]\n```\n\n' +
+  '## 处理流程\n\n先生成，后处理。\n\n## 没完成时\n\n缺材料就停下来问。\n';
 function seed(project) {
   for (const id of ['a', 'b']) {
     const dir = join(project, 'modules', id);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'module.json'), JSON.stringify({ id, name: id === 'a' ? '甲' : '乙', template: { id: 'project-framework', version: '3.0.0' }, status: 'ready' }, null, 2) + '\n');
-    for (const [file, text] of Object.entries(FILES)) writeFileSync(join(dir, file), text);
+    writeFileSync(join(dir, 'README.md'), README);
+    writeFileSync(join(dir, 'VALIDATION.md'), VALIDATION);
   }
-  writeFileSync(join(project, 'INPUT.md'), FILES['INPUT.md']);
-  writeFileSync(join(project, 'OUTPUT.md'), '# 输出要求\n\n返回处理结果。\n\n```interfaces\n[{ "name": "result", "description": "处理结果" }]\n```\n');
+  writeFileSync(join(project, 'README.md'), ROOT_README);
   writeFileSync(join(project, 'connections.json'), JSON.stringify({
     connections: [
       { from: { module: '$self', port: 'text' }, to: { module: 'a', port: 'text' }, info: '原始文字' },
@@ -50,7 +54,6 @@ function seed(project) {
       { from: { module: 'b', port: 'text' }, to: { module: '$self', port: 'result' }, info: '最终结果' },
     ],
   }, null, 2) + '\n');
-  spawnSync(process.execPath, [join(project, 'check.mjs'), '--panorama'], { encoding: 'utf8' });
 }
 
 function withCanvas(name, cases) {
@@ -145,7 +148,7 @@ test('打包：预览不写盘，确认后搬家、生成组合、改链接', ()
   if (done.links.length !== 0) throw Error('不该改链接，实际 ' + JSON.stringify(done.links));
   if (fs.existsSync(pjoin(project, 'modules/a'))) throw Error('旧目录应已移走');
   const readme = fs.readFileSync(pjoin(project, 'modules/flow/modules/b/README.md'), 'utf8');
-  if (!readme.includes('## 职责')) throw Error('内容被改坏了');
+  if (!readme.includes('## 输出')) throw Error('内容被改坏了');
   if (!fs.existsSync(pjoin(project, 'modules/flow/modules/a/README.md'))) throw Error('成员应在组合里');
 
   const after = await call('/api/project');
@@ -162,7 +165,6 @@ test('打包后通过结构检查', () => withCanvas('packcheck', async ({ call,
   const { spawnSync } = await import('node:child_process');
   const pjoin = (await import('node:path')).join;
   const check = pjoin(project, 'check.mjs');
-  spawnSync(process.execPath, [check, '--panorama'], { cwd: project });
   const result = spawnSync(process.execPath, [check, '--verify'], { cwd: project, encoding: 'utf8' });
   const report = (result.stdout || '') + (result.stderr || '');
   // 新组合是 pending，依赖它的根目录验收跳过，这是对的。

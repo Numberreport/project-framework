@@ -1,6 +1,5 @@
-# 运行记录、成果与本机设置，配套定义继续版本管理
-runs/
-outputs/
+# 运行数据与临时文件，配套定义继续版本管理
+workspace/
 node_modules/
 __pycache__/
 .venv/

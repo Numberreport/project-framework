@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 项目画布：在浏览器里拖线建连接、把几个模块打成一个组合、查看模块配套文件。
+// 项目画布：在浏览器里拖线建连接、把几个模块打成一个组合、查看模块说明书。
 //
 //   node canvas.mjs
 //
@@ -10,12 +10,11 @@ import { existsSync, readFileSync, writeFileSync, renameSync, cpSync, rmSync, re
 import { join, dirname, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 
 // 默认检查画布所在的目录；createCanvas(某个目录) 可以指到别处，测试和复用都靠这个。
 let ROOT = dirname(fileURLToPath(import.meta.url));
 const LAYOUT = 'canvas-layout.json';
-const DOCS = ['README.md', 'INPUT.md', 'OUTPUT.md', 'PROCESS.md', 'VALIDATION.md', 'SETTINGS.md'];
+const DOCS = ['README.md', 'VALIDATION.md'];
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 const inside = (base, target) => { const r = relative(base, target); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
 const rel = (path) => relative(ROOT, path).split(sep).join('/') || '.';
@@ -29,10 +28,13 @@ export function scan(dir) {
   const meta = readJson(join(dir, 'module.json'));
   if (!meta || typeof meta.id !== 'string') throw Error('模块缺少有效的 module.json：' + rel(dir));
   const node = { dir, label: rel(dir), meta, id: meta.id, name: String(meta.name || meta.id), children: [], links: [], stop: '', isCombo: false, inputs: [], outputs: [] };
-  for (const [side, file] of [['inputs', 'INPUT.md'], ['outputs', 'OUTPUT.md']]) {
-    const block = readText(join(dir, file)).match(/```interfaces\s*\r?\n([\s\S]*?)\r?\n```/);
-    try { node[side] = block ? JSON.parse(block[1]) : []; } catch { node[side] = []; }
-  }
+  // 接口只来自 README：接收的在「输入」小节，交出的在「输出」小节。根目录和模块一样。
+  const text = readText(join(dir, 'README.md'));
+  const parse = (json) => { try { return JSON.parse(json); } catch { return []; } };
+  const blockIn = (scope) => { const b = /```interfaces[ \t]*\r?\n([^]*?)\r?\n```/.exec(scope); return b ? parse(b[1]) : []; };
+  const sect = (title) => new RegExp('^##[ \\t]*' + title + '[ \\t]*\\r?\\n([^]*?)(?=^## |$(?![^]))', 'm').exec(text)?.[1] || '';
+  node.inputs = blockIn(sect('输入'));
+  node.outputs = blockIn(sect('输出'));
   const members = join(dir, 'modules');
   if (existsSync(members) && statSync(members).isDirectory()) {
     node.isCombo = true;
@@ -57,9 +59,9 @@ function readLayout() {
   return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
 }
 
-// 根目录的说明在 AGENTS.md，模块的说明在各自的 README.md。
+// 根目录和模块的说明都在各自的 README.md。
 function duties(node) {
-  const file = node.dir === ROOT ? 'AGENTS.md' : 'README.md';
+  const file = 'README.md';
   const body = readText(join(node.dir, file)).match(/^##[ \t]*职责[ \t]*\r?\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1].trim() || '';
   return body;
 }
@@ -167,7 +169,7 @@ function markdownFiles(dir) {
   const found = [];
   const walk = (current) => {
     for (const item of readdirSync(current, { withFileTypes: true })) {
-      if (item.name.startsWith('.') || ['runs', 'outputs', 'node_modules', 'knowledge'].includes(item.name)) continue;
+      if (item.name.startsWith('.') || ['node_modules', 'workspace'].includes(item.name)) continue;
       const path = join(current, item.name);
       if (item.isDirectory()) walk(path);
       else if (item.name.endsWith('.md')) found.push(path);
@@ -201,7 +203,7 @@ export function applyPack(tree, plan) {
       cpSync(from, to, { recursive: true });
       if (!existsSync(join(to, 'module.json'))) throw Error('复制失败：' + rel(from));
     }
-    // 2. 新组合的配套文件与内部连接。
+    // 2. 新组合的说明书与内部连接。
     writeCombo(plan);
     writeAtomic(join(plan.targetDir, 'connections.json'), JSON.stringify({ connections: plan.inner, ...(plan.stop ? { stop: plan.stop } : {}) }, null, 2) + '\n');
     // 3. 父层连接换成经过新组合。
@@ -220,21 +222,23 @@ export function applyPack(tree, plan) {
 const e_from_key = (e) => e.from.module + '.' + e.from.port;
 const sameEnds = (a, b) => e_from_key(a) === e_from_key(b) && a.to.module + '.' + a.to.port === b.to.module + '.' + b.to.port;
 
-// 新组合的配套文件。打包能确定的是成员和连接；职责和检验标准留给人补。
-// 这些文件写成「待补充」而不是 `<待填写>`，检查脚本认后者是在建的样子，前者是能跑的初稿。
+// 新组合的说明书和检查标准。打包能确定的是成员和连接；职责和检查标准留给人补。
+// 写成「待补充」而不是 `<待填写>`，检查脚本认后者是在建的样子，前者是能跑的初稿。
 function writeCombo(plan) {
   const portBlock = (ports) => '```interfaces\n' + JSON.stringify(ports, null, 2) + '\n```';
   const memberList = plan.members.map(m => '- ' + m.name + '（' + m.id + '）').join('\n');
   const flow = plan.inner.map(e => '- ' + e.from.module + '.' + e.from.port + ' → ' + e.to.module + '.' + e.to.port).join('\n') || '- 暂无内部连接';
+  const list = (ports, empty) => ports.length ? ports.map(p => '- ' + p.name + '：' + p.description).join('\n') : empty;
   const files = {
     'module.json': JSON.stringify({ id: plan.id, name: plan.name, template: { id: 'project-framework', version: '3.0.0' }, status: 'pending' }, null, 2) + '\n',
     'README.md': '# ' + plan.name + '\n\n## 职责\n\n由画布打包生成，负责组织以下模块完成一项任务；具体职责请补充一句话说明。\n\n' +
-      '成员：\n\n' + memberList + '\n\n完成后把 module.json 的状态从 pending 改成 ready。\n',
-    'INPUT.md': '# 输入要求\n\n' + (plan.inputs.length ? plan.inputs.map(p => '- ' + p.name + '：' + p.description).join('\n') + '\n' : '本组合不接收外部输入。\n') + '\n' + (plan.inputs.length ? portBlock(plan.inputs) + '\n' : ''),
-    'OUTPUT.md': '# 输出要求\n\n' + (plan.outputs.length ? plan.outputs.map(p => '- ' + p.name + '：' + p.description).join('\n') + '\n' : '本组合不对外输出。\n') + '\n' + (plan.outputs.length ? portBlock(plan.outputs) + '\n' : ''),
-    'PROCESS.md': '# 处理流程\n\n按 connections.json 把输入交给成员，收集成员的交付后对外输出。\n\n内部连接：\n\n' + flow +
-      '\n\n补充：交接的条件和需要停下来的情况请写在这里。\n',
-    'VALIDATION.md': '# 检验标准\n\n组合整体的交付怎样算合格，请结合成员各自的 VALIDATION.md 补充。\n',
+      '成员：\n\n' + memberList + '\n\n' +
+      '## 输入\n\n' + list(plan.inputs, '本组合不接收外部输入。') + '\n\n' + portBlock(plan.inputs) + '\n\n' +
+      '## 输出\n\n' + list(plan.outputs, '本组合不对外输出。') + '\n\n' + portBlock(plan.outputs) + '\n\n' +
+      '## 处理流程\n\n按 connections.json 把输入交给成员，收集成员的交付后对外输出。\n\n内部连接：\n\n' + flow +
+      '\n\n## 没完成时\n',
+    'VALIDATION.md': '# 检查标准\n\n组合整体的交付怎样算合格，请结合成员各自的 VALIDATION.md 补充。\n\n' +
+      '完成后把 module.json 的状态从 pending 改成 ready。\n',
   };
   for (const [name, content] of Object.entries(files)) writeAtomic(join(plan.targetDir, name), content);
 }
@@ -327,7 +331,6 @@ export function createCanvas(rootDir = ROOT) {
       if (req.url === '/api/pack') {
         const plan = planPack(loadTree(), data);
         const result = applyPack(loadTree(), plan);
-        spawnSync(process.execPath, [join(ROOT, 'check.mjs'), '--panorama'], { cwd: ROOT, encoding: 'utf8' });
         res.end(JSON.stringify({ done: describe(plan), ...result }));
         return;
       }

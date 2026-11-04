@@ -10,13 +10,19 @@ const source = join(dirname(fileURLToPath(import.meta.url)), '..');
 const leaf = 'modules/a';
 
 // 模板不带示例模块，每个用例先建两个最小模块和连好它们。
-const FILES = {
-  'INPUT.md': '# 输入要求\n\n接收一段文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n',
-  'OUTPUT.md': '# 输出要求\n\n返回处理后的文字。\n\n```interfaces\n[{ "name": "text", "description": "处理后的文字" }]\n```\n',
-  'README.md': '# 模块\n\n## 职责\n\n处理一段文字，交给下一个模块。\n',
-  'PROCESS.md': '# 处理流程\n\n1. 读取输入，处理一次，交出结果。\n',
-  'VALIDATION.md': '# 检验标准\n\n- 输出非空。\n',
-};
+// 模块写 README（四段，接口分两条）和 VALIDATION.md。
+const README = '# 模块\n\n## 职责\n\n处理一段文字，交给下一个模块。\n\n' +
+  '## 输入\n\n接收 text：待处理的文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n\n' +
+  '## 输出\n\n交付 text：处理后的文字。\n\n```interfaces\n[{ "name": "text", "description": "处理后的文字" }]\n```\n\n' +
+  '## 处理流程\n\n1. 读取输入，处理一次，交出结果。\n\n' +
+  '## 没完成时\n\n缺材料就停下来问，说清卡在哪。\n';
+const VALIDATION = '# 检查标准\n\n- 输出非空。\n';
+// 根目录的 README 按五段写，接口放在「输入」「输出」里，和模块一样。
+const ROOT_README = '# 项目\n\n## 职责\n\n把输入经两个模块处理后交回。\n\n' +
+  '## 输入\n\n接收 text：待处理的文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n\n' +
+  '## 输出\n\n交付 result：处理结果。\n\n```interfaces\n[{ "name": "result", "description": "处理结果" }]\n```\n\n' +
+  '## 处理流程\n\n先生成，后处理。\n\n## 没完成时\n\n缺材料就停下来问。\n';
+const FILES = { 'README.md': README, 'VALIDATION.md': VALIDATION };
 const addModule = (p, id, name, extra = {}) => {
   const dir = join(p, 'modules', id);
   mkdirSync(dir, { recursive: true });
@@ -26,8 +32,8 @@ const addModule = (p, id, name, extra = {}) => {
 const seed = (p) => {
   addModule(p, 'a', '甲');
   addModule(p, 'b', '乙');
-  writeFileSync(join(p, 'INPUT.md'), '# 输入要求\n\n接收一段文字。\n\n```interfaces\n[{ "name": "text", "description": "待处理的文字" }]\n```\n');
-  writeFileSync(join(p, 'OUTPUT.md'), '# 输出要求\n\n返回处理后的文字。\n\n```interfaces\n[{ "name": "result", "description": "处理结果" }]\n```\n');
+  // 根目录的 README 换成用例自己的五段和接口。
+  writeFileSync(join(p, 'README.md'), ROOT_README);
   writeFileSync(join(p, 'connections.json'), JSON.stringify({
     connections: [
       { from: { module: '$self', port: 'text' }, to: { module: 'a', port: 'text' }, info: '原始文字' },
@@ -35,7 +41,6 @@ const seed = (p) => {
       { from: { module: 'b', port: 'text' }, to: { module: '$self', port: 'result' }, info: '最终结果' },
     ],
   }, null, 2) + '\n');
-  spawnSync(process.execPath, [join(p, 'check.mjs'), '--panorama'], { encoding: 'utf8' });
 };
 
 // 每个用例在独立临时目录里跑，不碰模板本体。
@@ -80,12 +85,36 @@ test('两个模块各验收一次', () => fixture(p => {
 }));
 
 test('配套文件缺失', () => fixture(p => {
-  unlinkSync(join(p, leaf, 'INPUT.md'));
-  bad(p, /缺少配套文件/);
+  unlinkSync(join(p, leaf, 'README.md'));
+  bad(p, /缺少配套文件.*README\.md/);
+}));
+
+test('缺检查标准文件', () => fixture(p => {
+  unlinkSync(join(p, leaf, 'VALIDATION.md'));
+  bad(p, /缺少配套文件.*VALIDATION\.md/);
+}));
+
+test('README 缺一段', () => fixture(p => {
+  const path = join(p, leaf, 'README.md');
+  writeFileSync(path, readFileSync(path, 'utf8').split('## 输出')[0] + '## 处理流程\n\n一次。\n');
+  bad(p, /README 缺标题「输出」/);
+}));
+
+test('输入里写了两块接口', () => fixture(p => {
+  const path = join(p, leaf, 'README.md');
+  writeFileSync(path, readFileSync(path, 'utf8').replace('## 输出', '```interfaces\n[{ "name": "x", "description": "多写一块" }]\n```\n\n## 输出'));
+  bad(p, /接口定义只能有一块/);
+}));
+
+test('把输出接口写到「输入」里就接不上', () => fixture(p => {
+  // 去掉「输出」里那块接口，a 就没有对外交出的 text，a → b 的连接接不上。
+  const path = join(p, leaf, 'README.md');
+  writeFileSync(path, readFileSync(path, 'utf8').replace(/```interfaces\n\[\{ "name": "text", "description": "处理后的文字" \}\]\n```\n/, ''));
+  bad(p, /未定义的接口/);
 }));
 
 test('配套文件留有待填写占位', () => fixture(p => {
-  writeFileSync(join(p, leaf, 'OUTPUT.md'), '# 输出要求\n\n<待填写>\n');
+  writeFileSync(join(p, leaf, 'VALIDATION.md'), '# 检查标准\n\n<待填写>\n');
   bad(p, /没写完/);
 }));
 
@@ -116,7 +145,6 @@ test('反馈回路缺停止条件，补上后通过', () => fixture(p => {
   });
   bad(p, /没写停止条件/);
   edit(p, 'connections.json', d => d.stop = '连续不通过 3 次就停');
-  assert.equal(run(p, ['--panorama']).code, 0);
   assert.equal(run(p).code, 0);
 }));
 
@@ -166,21 +194,8 @@ test('待配置模块被跳过，依赖它的成员和组合也跳过', () => fi
   assert.equal((r.text.match(/✓ 验收通过/g) || []).length, 0);
 }));
 
-test('项目结构过期，重新生成后通过', () => fixture(p => {
-  edit(p, 'module.json', d => d.name = '改名了');
-  bad(p, /项目结构已过期/);
-  assert.equal(run(p, ['--panorama']).code, 0);
-  assert.equal(run(p).code, 0);
-}));
-
-test('AGENTS.md 缺项目结构时提示生成', () => fixture(p => {
-  const path = join(p, 'AGENTS.md');
-  writeFileSync(path, readFileSync(path, 'utf8').split('## 项目结构')[0]);
-  bad(p, /缺项目结构/);
-}));
-
 test('文档坏链接', () => fixture(p => {
-  writeFileSync(join(p, 'AGENTS.md'), readFileSync(join(p, 'AGENTS.md'), 'utf8').replace('## 项目结构', '[坏链接](missing.md)\n\n## 项目结构'));
+  writeFileSync(join(p, 'AGENTS.md'), readFileSync(join(p, 'AGENTS.md'), 'utf8') + '\n[坏链接](missing.md)\n');
   bad(p, /文档链接缺失/);
 }));
 

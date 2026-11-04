@@ -3,15 +3,15 @@
 //
 //   node check.mjs              结构检查
 //   node check.mjs --verify     结构检查 + 各模块 module.json 里 verify 指定的维护验收
-//   node check.mjs --panorama   重新生成 AGENTS.md 里的项目结构
 //   node check.mjs --tree       打印模块清单
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, isAbsolute, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const VERSION = '3.0.0';
-const REQUIRED = ['README.md', 'INPUT.md', 'OUTPUT.md', 'PROCESS.md', 'VALIDATION.md'];
+const REQUIRED = ['README.md', 'VALIDATION.md', 'module.json'];
+const SECTIONS = ['职责', '输入', '输出', '处理流程', '没完成时'];
 const root = dirname(fileURLToPath(import.meta.url));
 const errors = [];
 const fail = (message) => errors.push(message);
@@ -20,9 +20,20 @@ const read = (path) => readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
 const readJson = (path) => { try { return JSON.parse(read(path)); } catch { fail('JSON 无效或缺失：' + relative(root, path)); return null; } };
 const walkAll = (node) => node ? node.children.flatMap(child => [child, ...walkAll(child)]) : [];
 
-// 从 INPUT.md / OUTPUT.md 的 interfaces 代码块读取接口；没有代码块按空处理。
+// 按 README 的二级标题切开，取指定小节；标题必须写，缺了报错。
+function sectionOf(text, title) {
+  return new RegExp('^##[ \\t]*' + title + '[ \\t]*\\r?\\n([^]*?)(?=^## |$(?![^]))', 'm').exec(text)?.[1] ?? null;
+}
+function section(text, title, label) {
+  const body = sectionOf(text, title);
+  if (body === null) fail('README 缺标题「' + title + '」：' + label);
+  return body;
+}
+
+// 接口只来自 README：接收的写在「输入」，交出的写在「输出」，各一块代码块；没有按空处理。
+const blocksOf = (text) => [...text.matchAll(/```interfaces[ \t]*\r?\n([^]*?)\r?\n```/g)];
 function readPorts(text, label) {
-  const blocks = [...text.matchAll(/```interfaces\s*\r?\n([\s\S]*?)\r?\n```/g)];
+  const blocks = blocksOf(text);
   if (blocks.length > 1) { fail('接口定义只能有一块：' + label); return []; }
   if (!blocks.length) return [];
   let ports;
@@ -31,7 +42,7 @@ function readPorts(text, label) {
   const names = new Set();
   for (const port of ports) {
     if (!port || typeof port.name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(port.name)) fail('接口名称只能用字母、数字、下划线和短横线：' + label);
-    else if (names.has(port.name)) fail('同一方向的接口名称重复：' + label + '/' + port.name);
+    else if (names.has(port.name)) fail('接口名称重复：' + label + '/' + port.name);
     else names.add(port.name);
     if (typeof port.description !== 'string' || !port.description.trim()) fail('接口须填写要求：' + label + '/' + (port?.name || '?'));
   }
@@ -55,16 +66,20 @@ function visit(dir, ids, seen, parentLinks = []) {
   if (meta.template?.id !== 'project-framework' || meta.template?.version !== VERSION) fail('模板版本不受支持：' + label + '（需要确认迁移，不能猜格式）');
   if (!['ready', 'pending'].includes(meta.status)) fail('配置状态须为 ready 或 pending：' + label);
 
-  // 项目自己的说明放在 AGENTS.md 里，模块用 README.md；两者都不必两处都有。
+  // 项目自己的说明和模块一样写在 README.md 里。
   const isRoot = real === realpathSync(root);
-  const required = isRoot ? REQUIRED.filter(f => f !== 'README.md') : REQUIRED;
+  const doc = 'README.md';
+  const required = REQUIRED;
   for (const file of required) {
     const path = join(dir, file);
     if (!existsSync(path) || !statSync(path).isFile() || !inside(real, realpathSync(path))) fail('缺少配套文件或路径越界：' + label + '/' + file);
     else if (!read(path).trim() || read(path).includes('<待填写>')) fail('配套文件没写完：' + label + '/' + file);
   }
-  const settings = join(dir, 'SETTINGS.md');
-  if (existsSync(settings) && (!read(settings).trim() || read(settings).includes('<待填写>'))) fail('设置文件没写完：' + label + '/SETTINGS.md');
+  // README 的五段是固定的：职责、输入、输出、处理流程、没完成时。检查标准另在 VALIDATION.md。
+  const docPath = join(dir, doc);
+  const readable = existsSync(docPath) && inside(real, realpathSync(docPath));
+  const docText = readable ? read(docPath) : '';
+  if (readable) for (const title of SECTIONS) section(docText, title, label + '/' + doc);
 
   // implementation、verify 可选；填了就必须指向本模块内的真实文件。
   for (const field of ['implementation', 'verify']) {
@@ -78,11 +93,11 @@ function visit(dir, ids, seen, parentLinks = []) {
   if (meta.processor !== undefined && !['program', 'ai', 'mixed'].includes(meta.processor)) fail('processor 只能取 program、ai、mixed：' + label);
 
   // 配套文件缺失时上面已经记过错误，这里只读能读到的，不再重复报。
-  const portsOf = (file) => {
-    const path = join(dir, file);
-    return existsSync(path) ? readPorts(read(path), label + '/' + file) : [];
-  };
-  const node = { dir, label, meta, children: [], links: [], inputs: portsOf('INPUT.md'), outputs: portsOf('OUTPUT.md') };
+  // 输入看 README 的「输入」，输出看「输出」，根目录和模块一样。
+  const portsOf = (title) => { const body = sectionOf(docText, title); return body === null ? [] : readPorts(body, label + '/' + doc + ' 的「' + title + '」'); };
+  const inputs = readable ? portsOf('输入') : [];
+  const outputs = readable ? portsOf('输出') : [];
+  const node = { dir, label, meta, children: [], links: [], inputs, outputs };
 
   const hasMembers = existsSync(join(dir, 'modules'));
   const hasLinks = existsSync(join(dir, 'connections.json'));
@@ -113,7 +128,8 @@ function visit(dir, ids, seen, parentLinks = []) {
       if (typeof end?.port !== 'string' || !end.port.trim()) { fail('连接没写接口名：' + label + '/' + side); continue; }
       const owner = isSelf ? node : node.children.find(n => n.meta.id === end.module);
       const direction = isSelf ? (side === 'from' ? 'inputs' : 'outputs') : (side === 'from' ? 'outputs' : 'inputs');
-      if (owner && !owner[direction].some(p => p.name === end.port)) fail('连接引用了未定义的接口：' + label + '/' + end.module + '.' + end.port);
+      // 输入看「输入」那块代码块，输出看「输出」那块。
+      if (owner && !owner[direction].some(p => p.name === end.port)) fail('连接引用了未定义的接口：' + label + '/' + end.module + '.' + end.port + '（' + (direction === 'inputs' ? '接收的接口写在「输入」里' : '交出的接口写在「输出」里') + '）');
     }
     if (typeof edge.info !== 'string' || !edge.info.trim()) fail('连接没写传的是什么：' + label);
     if (edge.when !== undefined && (typeof edge.when !== 'string' || !edge.when.trim())) fail('连接条件留空：' + label);
@@ -145,7 +161,7 @@ function visit(dir, ids, seen, parentLinks = []) {
 // 文档里的本地链接必须指向真实文件。
 function checkLinks(dir) {
   for (const item of readdirSync(dir, { withFileTypes: true })) {
-    if (item.name.startsWith('.') || ['runs', 'outputs', 'knowledge', 'node_modules'].includes(item.name)) continue;
+    if (item.name.startsWith('.') || ['node_modules', 'workspace'].includes(item.name)) continue;
     const path = join(dir, item.name);
     if (item.isSymbolicLink()) continue;
     if (item.isDirectory()) { checkLinks(path); continue; }
@@ -160,35 +176,12 @@ function checkLinks(dir) {
   }
 }
 
-// 项目结构：从模块和连接直接生成，嵌在 AGENTS.md 的「项目结构」一节里。
-function renderPanorama(tree) {
-  const lines = ['## 项目结构', '', '下面这段由 `node check.mjs --panorama` 生成，别手改。它只表示模块和连接，不表示执行顺序；执行顺序写在 `PROCESS.md` 里。改了模块或连接，重新生成一次。', '', '### 模块', ''];
-  const walk = (node, depth) => {
-    const name = node.meta.name + '（' + node.meta.id + '）';
-    lines.push(depth ? '  '.repeat(depth) + '- ' + name + '：' + node.label : '- ' + name + '：根目录');
-    node.children.forEach(child => walk(child, depth + 1));
-  };
-  walk(tree, 0);
-  lines.push('', '### 连接', '');
-  const edges = (node) => {
-    if (!node.children.length) return;
-    lines.push('#### ' + node.meta.name, '');
-    for (const e of node.links) lines.push('- ' + e.from.module + '.' + e.from.port + ' → ' + e.to.module + '.' + e.to.port + '：' + e.info + (e.when ? '（条件：' + e.when + '）' : ''));
-    lines.push('');
-    node.children.forEach(edges);
-  };
-  edges(tree);
-  return lines.join('\n').trimEnd() + '\n';
-}
-
-const panoramaBlock = /^## 项目结构[^]*?(?=^## |(?![\s\S]))/m;
-
 const ids = new Set();
 const tree = visit(root, ids, new Set(), null);
 const all = tree ? [tree, ...walkAll(tree)] : [];
 
 // 根目录只放登记过的文件，防止临时文件、密钥混进来。
-const ROOT_ALLOWED = new Set(['AGENTS.md', 'INPUT.md', 'OUTPUT.md', 'PROCESS.md', 'VALIDATION.md', 'SETTINGS.md', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas.mjs', 'canvas.html', 'canvas-layout.json', 'tests', 'knowledge', 'runs', 'outputs']);
+const ROOT_ALLOWED = new Set(['README.md', 'AGENTS.md', 'VALIDATION.md', 'CANVAS.md', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas.mjs', 'canvas.html', 'canvas-layout.json', 'tests', 'workspace']);
 const ROOT_IGNORED = new Set(['node_modules', 'dist', 'build', '__pycache__', 'venv', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'Makefile', 'Thumbs.db', 'desktop.ini']);
 for (const entry of readdirSync(root)) {
   if (entry.startsWith('.') || ROOT_ALLOWED.has(entry) || ROOT_IGNORED.has(entry)) continue;
@@ -196,23 +189,7 @@ for (const entry of readdirSync(root)) {
 }
 checkLinks(root);
 
-const agentsPath = join(root, 'AGENTS.md');
-const agents = existsSync(agentsPath) ? read(agentsPath) : '';
-const panorama = tree ? renderPanorama(tree) : '';
-
-if (process.argv.includes('--panorama')) {
-  const text = panoramaBlock.test(agents)
-    ? agents.replace(panoramaBlock, panorama + '\n')
-    : agents.trimEnd() + '\n\n' + panorama + '\n';
-  writeFileSync(agentsPath, text);
-  console.log('已更新 AGENTS.md 里的项目结构');
-  process.exit(0);
-}
-if (panorama && agents) {
-  const match = agents.match(panoramaBlock);
-  if (!match) fail('AGENTS.md 缺项目结构，运行 node check.mjs --panorama 生成');
-  else if (match[0].trimEnd() !== panorama.trimEnd()) fail('AGENTS.md 的项目结构已过期，运行 node check.mjs --panorama');
-} else if (tree) fail('AGENTS.md 缺失');
+if (!existsSync(join(root, 'AGENTS.md'))) fail('AGENTS.md 缺失');
 
 if (process.argv.includes('--tree')) for (const n of all) console.log((n.label === '.' ? '根目录' : n.label) + ' [' + n.meta.id + '] ' + n.meta.name);
 

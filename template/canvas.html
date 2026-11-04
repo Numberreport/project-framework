@@ -334,7 +334,7 @@ async function showDocs(id) {
     } catch (e) { pre.textContent = e.message; }
   }));
   const first = panel.querySelector('[data-file]');
-  if (first) first.click(); else pre.textContent = '这个模块还没有配套文件。';
+  if (first) first.click(); else pre.textContent = '这个模块还没有说明书。';
 }
 
 // ---- 保存与打包 -------------------------------------------------------------

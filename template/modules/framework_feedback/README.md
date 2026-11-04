@@ -1,11 +1,45 @@
 # 框架反馈
 
-- [输入](INPUT.md)、[输出](OUTPUT.md)、[处理流程](PROCESS.md)、[检验标准](VALIDATION.md)、[设置](SETTINGS.md)、[智能体操作指引](implementation/instructions.md)。
+- [检查标准](VALIDATION.md)、[智能体操作指引](implementation/instructions.md)。
 
 ## 职责
 
 把使用框架时发现的问题整理成一份可以公开的 GitHub Issue 反馈给框架仓库。只处理通用框架的问题；项目自己的功能问题归那个项目管。
 
-用法：在对话里说“反馈框架问题”，或直接用 [反馈表单](https://github.com/Numberreport/project-framework/issues/new?template=framework-feedback.yml)。由当前智能体执行，需要已登录的 GitHub 工具；不内置账号、密钥或自动上报程序。
+用法：在对话里说“反馈框架问题”，或直接用[反馈表单](https://github.com/Numberreport/project-framework/issues/new?template=framework-feedback.yml)。由当前智能体执行，需要已登录的 GitHub 工具；不内置账号、密钥或自动上报程序。
 
-默认先展示内容再确认。配套文件齐全只说明配置就绪，不代表已经提交过反馈。
+## 输入
+
+接收 feedback：一项关于通用框架的问题或建议，至少要有遇到的情况和发生位置。
+
+要核对本模块的设置和这次的指令，确认目标、提交方式和授权范围。内容不得含账号、密钥、个人信息、项目路径、业务数据或其他项目的隐私。
+
+```interfaces
+[{ "name": "feedback", "description": "一项通用框架的问题或建议" }]
+```
+
+## 输出
+
+交付 result，按情况是下面之一：
+
+- 已提交：Issue 链接。
+- 已有反馈：对应的 Issue 链接和一句说明。
+- 待确认：准备公开的标题和正文，等使用者确认。
+- 没做成时：见下一段。
+
+正文统一五项：遇到的情况、问题在框架哪处、建议怎么改、影响哪些文件、是否已临时变通。正文和标题只在当前对话返回。
+
+```interfaces
+[{ "name": "result", "description": "反馈处理结果：链接、草稿或原因" }]
+```
+
+## 处理流程
+
+判断是否属于通用框架、整理隐私、查重、按检查标准自查、提交。具体步骤和设置见[智能体操作指引](implementation/instructions.md)。
+
+本模块只反馈问题，不修框架、不改规则、不评论、不关闭 Issue。
+
+## 没完成时
+
+- 授权不清、隐私去不干净、查重失败：先问，或只交草稿，不说成已经提交。
+- 提交超时、连接中断、结果不明：记为待确认，说清在查，不盲目重试。
