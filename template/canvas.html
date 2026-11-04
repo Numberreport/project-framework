@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>项目画布</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; color: #222; background: #f4f3ef; display: flex; height: 100vh; overflow: hidden; }
+  #side { width: 300px; background: #fff; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+  #side h1 { font-size: 15px; margin: 0; padding: 14px 16px; border-bottom: 1px solid #eee; }
+  #breadcrumb { padding: 8px 16px; color: #666; font-size: 13px; border-bottom: 1px solid #eee; }
+  #breadcrumb a { color: #0366d6; cursor: pointer; }
+  #members { overflow: auto; flex: 1; }
+  .member { display: flex; gap: 8px; padding: 8px 16px; border-bottom: 1px solid #f2f2f2; cursor: pointer; }
+  .member:hover { background: #f8f8f6; }
+  .member input { margin-top: 5px; }
+  .member .name { font-weight: 600; }
+  .member .sum { color: #777; font-size: 12px; }
+  .member .tag { color: #b26a00; font-size: 12px; }
+  #side .actions { padding: 12px 16px; border-top: 1px solid #eee; display: flex; flex-direction: column; gap: 8px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid #ccc; background: #fff; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #f0f0ee; }
+  button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #stage { flex: 1; position: relative; overflow: hidden; }
+  #edges { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #edges path.line { fill: none; stroke: #999; stroke-width: 1.6; }
+  #edges path.line:hover { stroke: #2f6feb; stroke-width: 3; cursor: pointer; }
+  #edges text { font-size: 11px; fill: #666; pointer-events: none; }
+  #board { position: absolute; inset: 0; }
+  .node { position: absolute; width: 210px; background: #fff; border: 1px solid #bbb; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .node.self { border-color: #2f6feb; background: #f7f9ff; }
+  .node .head { padding: 8px 10px; font-weight: 600; border-bottom: 1px solid #eee; cursor: move; }
+  .node .head small { display: block; font-weight: 400; color: #888; font-size: 11px; }
+  .node .ports { padding: 6px 0 8px; }
+  .port { display: flex; align-items: center; gap: 6px; padding: 2px 10px; font-size: 12px; color: #555; }
+  .port.out { justify-content: flex-end; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #2f6feb; border: 2px solid #fff; box-shadow: 0 0 0 1px #2f6feb; cursor: crosshair; flex: none; }
+  .dot.in { background: #2e9d5b; box-shadow: 0 0 0 1px #2e9d5b; }
+  #panel { position: absolute; right: 0; top: 0; bottom: 0; width: 440px; background: #fff; border-left: 1px solid #ddd; overflow: auto; padding: 16px; display: none; }
+  #panel.show { display: block; }
+  #panel h2 { font-size: 15px; margin: 0 0 4px; }
+  #panel .path { color: #888; font-size: 12px; margin-bottom: 12px; }
+  #panel .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+  #panel .tabs button.on { background: #2f6feb; color: #fff; border-color: #2f6feb; }
+  #panel pre { white-space: pre-wrap; word-break: break-word; background: #fafaf8; padding: 10px; border: 1px solid #eee; border-radius: 4px; font-size: 12px; }
+  #status { position: absolute; left: 16px; bottom: 16px; background: rgba(0,0,0,.78); color: #fff; padding: 6px 12px; border-radius: 4px; font-size: 13px; display: none; max-width: 60%; }
+  dialog { border: 1px solid #ccc; border-radius: 8px; padding: 18px; width: 540px; }
+  dialog h3 { margin: 0 0 12px; font-size: 15px; }
+  dialog ul { padding-left: 18px; margin: 8px 0; font-size: 13px; }
+  dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  dialog .warn { color: #b33; font-size: 13px; }
+  dialog code { background: #f2f2f0; padding: 1px 4px; border-radius: 3px; }
+  #packForm label { display: block; margin: 8px 0 4px; font-size: 13px; }
+  #packForm input { width: 100%; padding: 6px 8px; font: inherit; border: 1px solid #ccc; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>项目画布</h1>
+  <div id="breadcrumb"></div>
+  <div id="members"></div>
+  <div class="actions">
+    <button id="pack" disabled>把勾选的模块打成组合…</button>
+    <button id="save">保存连接</button>
+  </div>
+</div>
+<div id="stage">
+  <svg id="edges"></svg>
+  <div id="board"></div>
+  <div id="panel"></div>
+  <div id="status"></div>
+</div>
+
+<dialog id="packDialog">
+  <h3>打包</h3>
+  <form id="packForm">
+    <label>新组合的标识（字母、数字、下划线）</label>
+    <input name="id" placeholder="例如 text_flow" required pattern="[A-Za-z0-9][A-Za-z0-9_-]*">
+    <label>显示名称</label>
+    <input name="name" placeholder="例如 文字处理组合" required>
+  </form>
+  <div id="packBody"></div>
+  <div class="row">
+    <button id="packCancel">取消</button>
+    <button id="packPreview">预览</button>
+    <button id="packConfirm" class="primary" disabled>确认打包</button>
+  </div>
+</dialog>
+
+<script>
+const TOKEN = '__TOKEN__';
+const $ = (id) => document.getElementById(id);
+const state = { data: null, levelId: null, path: [], draft: [], stop: '', dirty: false, positions: {} };
+
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const sel = (id) => (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+
+async function api(path, body) {
+  const options = body
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-canvas-token': TOKEN }, body: JSON.stringify(body) }
+    : { headers: { 'x-canvas-token': TOKEN } };
+  const res = await fetch(path, options);
+  let data;
+  try { data = await res.json(); } catch { throw Error('服务没有返回数据'); }
+  if (!res.ok) throw Error(data.error || '请求失败');
+  return data;
+}
+
+let toastTimer = null;
+function toast(text, ms) {
+  const el = $('status');
+  el.textContent = text;
+  el.style.display = 'block';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.display = 'none'; }, ms || 2600);
+}
+
+async function reload(levelId) {
+  try {
+    state.data = await api('/api/project');
+    if (!state.data.levels[levelId]) levelId = state.data.root.id;
+    openLevel(levelId, true);
+  } catch (e) {
+    toast('读取失败：' + e.message, 8000);
+  }
+}
+
+function openLevel(id, resetPath) {
+  const level = state.data.levels[id];
+  if (!level) return;
+  state.levelId = id;
+  state.draft = JSON.parse(JSON.stringify(level.links));
+  state.stop = level.stop || '';
+  state.dirty = false;
+  state.positions = JSON.parse(JSON.stringify(state.data.layout[id] || {}));
+  if (resetPath) state.path = [];
+  markDirty(false);
+  renderSide();
+  render();
+}
+
+function markDirty(value) {
+  state.dirty = value;
+  $('save').textContent = value ? '保存连接（有改动）' : '保存连接';
+}
+
+function renderSide() {
+  const level = state.data.levels[state.levelId];
+  const trail = ['<a data-go="' + state.data.root.id + '">' + esc(state.data.root.name) + '</a>'];
+  for (const step of state.path) trail.push('<a data-go="' + step.id + '">' + esc(step.name) + '</a>');
+  $('breadcrumb').innerHTML = trail.join(' / ');
+  $('members').innerHTML = level.members.map(m =>
+    '<div class="member" data-open="' + esc(m.id) + '">' +
+      '<input type="checkbox" data-check="' + esc(m.id) + '" aria-label="选择' + esc(m.name) + '">' +
+      '<div><div class="name">' + esc(m.name) + (m.isCombo ? ' <span class="tag">组合 · 双击进入</span>' : '') + '</div>' +
+      '<div class="sum">' + esc(m.summary || '职责未填写') + '</div></div>' +
+    '</div>').join('') || '<div class="member">这一层没有其他成员</div>';
+  updatePackButton();
+}
+
+function updatePackButton() {
+  $('pack').disabled = document.querySelectorAll('[data-check]:checked').length < 2;
+}
+
+// ---- 画布 -------------------------------------------------------------------
+
+function nodesOf(level) {
+  const list = [{ id: '$self', name: level.name, inputs: level.inputs, outputs: level.outputs, self: true }];
+  for (const m of level.members) list.push({ id: m.id, name: m.name, inputs: m.inputs, outputs: m.outputs, isCombo: m.isCombo });
+  return list;
+}
+
+function positionOf(id, index) {
+  return state.positions[id] || { x: 60 + Math.floor(index / 3) * 280, y: 40 + (index % 3) * 210 };
+}
+
+function render() {
+  const level = state.data.levels[state.levelId];
+  const board = $('board');
+  board.innerHTML = '';
+  nodesOf(level).forEach((node, index) => {
+    const pos = positionOf(node.id, index);
+    const el = document.createElement('div');
+    el.className = 'node' + (node.self ? ' self' : '');
+    el.style.left = pos.x + 'px';
+    el.style.top = pos.y + 'px';
+    el.dataset.id = node.id;
+    el.innerHTML =
+      '<div class="head">' + esc(node.name) +
+        '<small>' + (node.self ? '本层（$self）' : esc(node.id)) + (node.isCombo ? ' · 双击进入' : ' · 双击看文件') + '</small></div>' +
+      '<div class="ports">' +
+        (node.inputs || []).map(p => '<div class="port"><span class="dot in" data-dot="in" data-id="' + esc(node.id) + '" data-port="' + esc(p.name) + '" title="' + esc(p.description) + '"></span>' + esc(p.name) + '</div>').join('') +
+        (node.outputs || []).map(p => '<div class="port out">' + esc(p.name) + '<span class="dot" data-dot="out" data-id="' + esc(node.id) + '" data-port="' + esc(p.name) + '" title="' + esc(p.description) + '"></span></div>').join('') +
+        ((node.inputs || []).length + (node.outputs || []).length === 0 ? '<div class="port">没有定义接口</div>' : '') +
+      '</div>';
+    board.appendChild(el);
+
+    const head = el.querySelector('.head');
+    head.addEventListener('mousedown', (e) => startDrag(e, el, node.id));
+    head.addEventListener('dblclick', () => node.isCombo ? enterCombo(node.id) : showDocs(node.id));
+    el.querySelectorAll('[data-dot]').forEach(dot => dot.addEventListener('mousedown', (e) => startLink(e, dot)));
+  });
+  drawEdges();
+}
+
+function drawEdges() {
+  const svg = $('edges');
+  svg.innerHTML = '';
+  state.draft.forEach((edge, index) => {
+    const from = document.querySelector('[data-dot="out"][data-id="' + sel(edge.from.module) + '"][data-port="' + sel(edge.from.port) + '"]');
+    const to = document.querySelector('[data-dot="in"][data-id="' + sel(edge.to.module) + '"][data-port="' + sel(edge.to.port) + '"]');
+    if (!from || !to) return;
+    const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+    const x1 = a.left + a.width / 2, y1 = a.top + a.height / 2, x2 = b.left + b.width / 2, y2 = b.top + b.height / 2;
+    const mx = Math.max((x1 + x2) / 2, x1 + 40);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('class', 'line');
+    path.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
+    path.addEventListener('click', () => editEdge(index));
+    path.addEventListener('contextmenu', (e) => { e.preventDefault(); removeEdge(index); });
+    svg.appendChild(path);
+    if (edge.info) {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', (x1 + x2) / 2 - 40);
+      label.setAttribute('y', (y1 + y2) / 2 - 8);
+      label.textContent = edge.info.length > 18 ? edge.info.slice(0, 18) + '…' : edge.info;
+      svg.appendChild(label);
+    }
+  });
+}
+
+function startDrag(event, el, id) {
+  event.preventDefault();
+  const origin = { x: event.clientX, y: event.clientY, left: el.offsetLeft, top: el.offsetTop };
+  const move = (e) => {
+    el.style.left = Math.max(0, origin.left + e.clientX - origin.x) + 'px';
+    el.style.top = Math.max(0, origin.top + e.clientY - origin.y) + 'px';
+    drawEdges();
+  };
+  const up = () => {
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup', up);
+    state.positions[id] = { x: el.offsetLeft, y: el.offsetTop };
+    markDirty(true);
+  };
+  document.addEventListener('mousemove', move);
+  document.addEventListener('mouseup', up);
+}
+
+let linking = null;
+function startLink(event, dot) {
+  if (dot.dataset.dot !== 'out') return;
+  event.preventDefault();
+  event.stopPropagation();
+  const r = dot.getBoundingClientRect();
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', '#2f6feb');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('stroke-dasharray', '4 3');
+  $('edges').appendChild(path);
+  linking = { from: { module: dot.dataset.id, port: dot.dataset.port }, path, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+document.addEventListener('mousemove', (e) => {
+  if (!linking) return;
+  linking.path.setAttribute('d', 'M' + linking.x + ',' + linking.y + ' L' + e.clientX + ',' + e.clientY);
+});
+document.addEventListener('mouseup', (e) => {
+  if (!linking) return;
+  linking.path.remove();
+  const from = linking.from;
+  linking = null;
+  const dot = e.target.closest ? e.target.closest('[data-dot="in"]') : null;
+  if (!dot) return;
+  editEdge(state.draft.length, { from, to: { module: dot.dataset.id, port: dot.dataset.port }, info: '' }, true);
+});
+
+function editEdge(index, preset, isNew) {
+  const edge = preset || state.draft[index];
+  if (!edge) return;
+  const info = prompt('这条线传的是什么？', edge.info || '');
+  if (info === null) return;
+  if (!info.trim()) { toast('要写清传的是什么'); return; }
+  const when = prompt('什么条件下才传？可以留空。', edge.when || '');
+  if (when === null) return;
+  const next = { from: edge.from, to: edge.to, info: info.trim() };
+  if (when.trim()) next.when = when.trim();
+  if (isNew) state.draft.push(next); else state.draft[index] = next;
+  markDirty(true);
+  drawEdges();
+}
+
+function removeEdge(index) {
+  const edge = state.draft[index];
+  if (!edge) return;
+  if (!confirm('删掉这条线？\n' + edge.from.module + '.' + edge.from.port + ' → ' + edge.to.module + '.' + edge.to.port)) return;
+  state.draft.splice(index, 1);
+  markDirty(true);
+  drawEdges();
+}
+
+// ---- 组合与文件 -------------------------------------------------------------
+
+function enterCombo(id) {
+  const level = state.data.levels[state.levelId];
+  const member = level.members.find(m => m.id === id);
+  if (!member) return;
+  if (state.dirty && !confirm('当前层有没保存的改动，进入组合后这些改动会丢失。继续？')) return;
+  state.path.push({ id, name: member.name });
+  openLevel(id, false);
+}
+
+function goTo(id) {
+  const index = state.path.findIndex(step => step.id === id);
+  state.path = index < 0 ? [] : state.path.slice(0, index);
+  openLevel(id, false);
+}
+
+async function showDocs(id) {
+  const info = state.data.docs[id];
+  if (!info) return;
+  const panel = $('panel');
+  panel.classList.add('show');
+  panel.innerHTML = '<h2>' + esc(info.name) + '</h2><div class="path">' + esc(info.label) + '</div>' +
+    '<div class="tabs">' + info.files.map(f => '<button data-file="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div><pre></pre>';
+  const pre = panel.querySelector('pre');
+  panel.querySelectorAll('[data-file]').forEach(btn => btn.addEventListener('click', async () => {
+    panel.querySelectorAll('[data-file]').forEach(b => b.classList.toggle('on', b === btn));
+    pre.textContent = '读取中…';
+    try {
+      const doc = await api('/api/doc?id=' + encodeURIComponent(id) + '&file=' + encodeURIComponent(btn.dataset.file));
+      pre.textContent = doc.content;
+    } catch (e) { pre.textContent = e.message; }
+  }));
+  const first = panel.querySelector('[data-file]');
+  if (first) first.click(); else pre.textContent = '这个模块还没有配套文件。';
+}
+
+// ---- 保存与打包 -------------------------------------------------------------
+
+async function save() {
+  try {
+    state.data = await api('/api/save', {
+      levelId: state.levelId, links: state.draft, stop: state.stop,
+      positions: state.positions, revision: state.data.revisions[state.levelId],
+    });
+    openLevel(state.levelId, false);
+    toast('已保存');
+  } catch (e) { toast('保存失败：' + e.message, 8000); }
+}
+
+function selected() {
+  return [...document.querySelectorAll('[data-check]:checked')].map(c => c.dataset.check);
+}
+
+async function previewPack() {
+  const form = $('packForm');
+  const id = form.id.value.trim();
+  const name = form.name.value.trim();
+  if (!id || !name) { toast('先填标识和名称'); return null; }
+  try {
+    const preview = await api('/api/pack-preview', { parentId: state.levelId, memberIds: selected(), id, name });
+    $('packBody').innerHTML =
+      '<p>新组合 <b>' + esc(preview.combo) + '</b>，放在 <code>' + esc(preview.location) + '</code></p>' +
+      '<p>会移动这些目录：</p><ul>' + preview.move.map(m => '<li>' + esc(m.name) + '：' + esc(m.from) + ' → ' + esc(m.to) + '</li>').join('') + '</ul>' +
+      '<p>对新组合开放接口：输入 ' + preview.inputs.length + ' 个，输出 ' + preview.outputs.length + ' 个。' +
+      '内部保留 ' + preview.inner + ' 条连接，跨边界 ' + preview.outer + ' 条改成经过新组合。</p>' +
+      '<p>Markdown 里指向这些模块的相对链接会一起改。</p>' +
+      '<p class="warn">打包会移动目录。先确认项目已提交或已备份。</p>';
+    $('packConfirm').disabled = false;
+    return { id, name };
+  } catch (e) { toast('预览失败：' + e.message, 8000); return null; }
+}
+
+// ---- 事件 -------------------------------------------------------------------
+
+document.addEventListener('click', (e) => {
+  const go = e.target.closest('[data-go]');
+  if (go) { goTo(go.dataset.go); return; }
+  if (e.target.matches('[data-check]')) { updatePackButton(); return; }
+  const open = e.target.closest('[data-open]');
+  if (open) showDocs(open.dataset.open);
+});
+
+$('save').addEventListener('click', save);
+$('pack').addEventListener('click', () => { $('packForm').reset(); $('packBody').innerHTML = ''; $('packConfirm').disabled = true; $('packDialog').showModal(); });
+$('packCancel').addEventListener('click', () => $('packDialog').close());
+$('packPreview').addEventListener('click', (e) => { e.preventDefault(); previewPack(); });
+$('packConfirm').addEventListener('click', async (e) => {
+  e.preventDefault();
+  const form = $('packForm');
+  const body = { parentId: state.levelId, memberIds: selected(), id: form.id.value.trim(), name: form.name.value.trim() };
+  $('packDialog').close();
+  try {
+    const done = await api('/api/pack', body);
+    toast('已打包，改了 ' + (done.links || []).length + ' 处链接', 5000);
+    await reload(state.levelId);
+  } catch (err) { toast('打包失败：' + err.message, 10000); }
+});
+
+window.addEventListener('resize', drawEdges);
+reload();
+</script>
+</body>
+</html>
