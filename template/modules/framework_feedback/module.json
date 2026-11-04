@@ -1,9 +1,10 @@
 {
-  "id": "framework-feedback",
+  "id": "framework_feedback",
   "name": "框架反馈",
   "template": {
     "id": "project-framework",
-    "version": "2.0.0"
+    "version": "3.0.0"
   },
-  "status": "ready"
+  "status": "ready",
+  "implementation": "implementation/instructions.md"
 }

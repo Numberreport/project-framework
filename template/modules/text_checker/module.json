@@ -1,0 +1,11 @@
+{
+  "id": "text_checker",
+  "name": "重排核对",
+  "template": {
+    "id": "project-framework",
+    "version": "3.0.0"
+  },
+  "status": "ready",
+  "implementation": "run.mjs",
+  "verify": "verify.mjs"
+}

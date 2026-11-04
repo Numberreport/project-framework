@@ -1,26 +1,9 @@
 {
   "connections": [
-    {
-      "from": {
-        "module": "$self",
-        "port": "text"
-      },
-      "to": {
-        "module": "example-combo",
-        "port": "text"
-      },
-      "info": "原始文字"
-    },
-    {
-      "from": {
-        "module": "example-combo",
-        "port": "text"
-      },
-      "to": {
-        "module": "$self",
-        "port": "text"
-      },
-      "info": "重排后的文字"
-    }
-  ]
+    { "from": { "module": "$self", "port": "original" }, "to": { "module": "text_reorder", "port": "text" }, "info": "待重排的原始文字" },
+    { "from": { "module": "text_reorder", "port": "text" }, "to": { "module": "text_checker", "port": "text" }, "info": "重排结果" },
+    { "from": { "module": "$self", "port": "original" }, "to": { "module": "text_checker", "port": "original" }, "info": "原始文字，供核对对照" },
+    { "from": { "module": "text_checker", "port": "result" }, "to": { "module": "$self", "port": "result" }, "info": "检验结论" }
+  ],
+  "stop": "检验连续不通过 3 次就停下，交给使用者决定，不自动继续修改。"
 }

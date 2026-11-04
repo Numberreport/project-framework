@@ -1,0 +1,9 @@
+import { pathToFileURL } from 'node:url';
+import { transform } from './impl.mjs';
+export function run(text) {
+  if (typeof text !== 'string' || !text.trim()) throw new Error('text 必须是非空字符串');
+  return transform(text);
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try { console.log(run(process.argv[2])); } catch (e) { console.error(e.message); process.exitCode = 1; }
+}
