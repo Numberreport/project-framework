@@ -1,0 +1,7 @@
+{
+  "id": "ai_example",
+  "name": "AI 本体示例",
+  "template": { "id": "project-framework", "version": "3.0.0" },
+  "status": "pending",
+  "implementation": "implementation/prompt.md"
+}
