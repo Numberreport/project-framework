@@ -21,6 +21,53 @@
         "port": "feedback"
       },
       "info": "一项通用框架的问题或建议"
+    },
+    {
+      "from": {
+        "module": "combo_2cdba77fc61b442cb79f9ca78acc1843",
+        "port": "output"
+      },
+      "to": {
+        "module": "node_8625bea3e733",
+        "port": "input"
+      },
+      "info": "处理后的结果"
+    },
+    {
+      "from": {
+        "module": "input_b708125139b12aa0",
+        "port": "value"
+      },
+      "to": {
+        "module": "combo_2cdba77fc61b442cb79f9ca78acc1843",
+        "port": "input"
+      },
+      "info": "待处理的材料"
+    },
+    {
+      "from": {
+        "module": "node_8625bea3e733",
+        "port": "output"
+      },
+      "to": {
+        "module": "io_f5f783d30d1e4d2c8d775121ea068bce",
+        "port": "value"
+      },
+      "info": "处理后的结果"
+    }
+  ],
+  "ioNodes": [
+    {
+      "id": "input_b708125139b12aa0",
+      "type": "input",
+      "name": "input",
+      "description": "待处理的材料"
+    },
+    {
+      "id": "io_f5f783d30d1e4d2c8d775121ea068bce",
+      "type": "output",
+      "name": "输出",
+      "description": "处理后的结果"
     }
   ]
 }
