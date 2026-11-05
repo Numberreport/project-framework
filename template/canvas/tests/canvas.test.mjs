@@ -1,4 +1,4 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -74,7 +74,7 @@ function withCanvas(name, cases) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-canvas-'));
   const project = join(dir, 'project');
   try {
-    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || basename(path) === 'framework_feedback') });
+    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || ['framework_feedback', 'ai_example'].includes(basename(path))) });
     seed(project);
     mkdirSync(join(project, 'tests'), { recursive: true }); writeFileSync(join(project, 'tests/case.mjs'), 'export default ' + cases.toString() + ';\n');
     writeFileSync(join(project, 'tests/run-canvas.mjs'), runner);
@@ -93,7 +93,7 @@ test('页面能打开，根目录作为一层显示三个成员', () => withCanv
   const data = await call('/api/project');
   if (!data.levels[data.root.id]) throw Error('根目录应作为一层');
   const count = data.levels[data.root.id].members.length;
-  if (count !== 3) throw Error('成员数应为 3（框架反馈 + 两个样本），实际 ' + count);
+  if (count !== 4) throw Error('成员数应为 4（框架反馈 + AI 示例 + 两个样本），实际 ' + count);
 }));
 
 test('能读到模块配套文件，读不到模块外', () => withCanvas('doc', async ({ call }) => {
