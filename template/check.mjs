@@ -189,7 +189,7 @@ const tree = visit(root, ids, new Set(), null);
 const all = tree ? [tree, ...walkAll(tree)] : [];
 
 // 根目录只放登记过的文件，防止临时文件、密钥混进来。
-const ROOT_ALLOWED = new Set(['README.md', 'AGENTS.md', 'VALIDATION.md', 'CANVAS.md', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas.mjs', 'canvas.html', 'canvas-layout.json', 'tests', 'workspace']);
+const ROOT_ALLOWED = new Set(['README.md', 'AGENTS.md', 'VALIDATION.md', 'canvas', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas-layout.json', 'tests', 'workspace']);
 const ROOT_IGNORED = new Set(['node_modules', 'dist', 'build', '__pycache__', 'venv', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'Makefile', 'Thumbs.db', 'desktop.ini']);
 for (const entry of readdirSync(root)) {
   if (entry.startsWith('.') || ROOT_ALLOWED.has(entry) || ROOT_IGNORED.has(entry)) continue;

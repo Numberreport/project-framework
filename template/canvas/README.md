@@ -5,7 +5,7 @@
 ## 启动
 
 ```bash
-node canvas.mjs
+node canvas/canvas.mjs
 ```
 
 打开终端显示的本机地址。点击“草稿”新建或打开一份草稿，进入编辑模式。每份草稿从当前正式项目复制，独立保存在 `.canvas-drafts/`，可以重命名、删除或复制路径。正式结构有变化时，草稿列表会提示“基于旧版项目”。
@@ -68,7 +68,7 @@ node canvas.mjs
 ## 验证
 
 ```bash
-node --test tests/*.test.mjs
+node --test tests/*.test.mjs canvas/tests/*.test.mjs
 node check.mjs
 ```
 

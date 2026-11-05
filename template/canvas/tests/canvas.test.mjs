@@ -6,14 +6,14 @@ import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const source = join(dirname(fileURLToPath(import.meta.url)), '..');
+const source = join(dirname(fileURLToPath(import.meta.url)), '../..');
 
 // 每个用例在临时项目中建立独立草稿。
 const runner = `
 import { pathToFileURL } from 'node:url';
 const formal = process.argv[2];
 let project = formal;
-const { createCanvas } = await import(pathToFileURL(project + '/canvas.mjs').href);
+const { createCanvas } = await import(pathToFileURL(project + '/canvas/canvas.mjs').href);
 const server = createCanvas(project);
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const base = 'http://127.0.0.1:' + server.address().port;

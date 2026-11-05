@@ -48,7 +48,7 @@ function fixture(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-check-'));
   const project = join(dir, 'project');
   try {
-    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git'].includes(basename(path)) });
+    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || basename(path) === 'framework_feedback') });
     seed(project);
     fn(project);
   } finally {

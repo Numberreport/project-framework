@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 项目画布：在浏览器里拖线建连接、把几个模块打成一个组合、查看模块说明书。
 //
-//   node canvas.mjs
+//   node canvas/canvas.mjs
 //
 // 画布只负责显示和编辑。真实连接始终以各层的 connections.json 为准；
 // 节点位置存在根目录的 canvas-layout.json，删掉不影响连接，只是重新布局。
@@ -11,8 +11,8 @@ import { join, dirname, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
 
-// 默认检查画布所在的目录；createCanvas(某个目录) 可以指到别处，测试和复用都靠这个。
-let ROOT = dirname(fileURLToPath(import.meta.url));
+// 默认读取画布目录的上一级项目；createCanvas(某个目录) 可以指到别处，测试和复用都靠这个。
+let ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const LAYOUT = 'canvas-layout.json';
 const DOCS = ['README.md', 'VALIDATION.md', 'module.json'];
 function filesOf(node) {
@@ -745,5 +745,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 
 
 // 页面单独放 canvas.html，读一次缓存在内存里，改了重启服务即可生效。
-const PAGE_PATH = join(ROOT, 'canvas.html');
 const PAGE = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'canvas.html'), 'utf8');
