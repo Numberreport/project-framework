@@ -1,0 +1,26 @@
+{
+  "connections": [
+    {
+      "from": {
+        "module": "node_f903feef71bb",
+        "port": "output"
+      },
+      "to": {
+        "module": "node_4f52a8c3841f",
+        "port": "input"
+      },
+      "info": "处理后的结果"
+    },
+    {
+      "from": {
+        "module": "$self",
+        "port": "input"
+      },
+      "to": {
+        "module": "node_f903feef71bb",
+        "port": "input"
+      },
+      "info": "待处理的材料"
+    }
+  ]
+}

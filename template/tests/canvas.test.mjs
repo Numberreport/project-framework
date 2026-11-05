@@ -8,21 +8,35 @@ import { spawnSync } from 'node:child_process';
 
 const source = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// 画布服务持有模块级状态（当前项目的根目录），同一进程里反复创建会互相干扰。
-// 所以每个用例复制一份项目，在独立子进程里起服务、跑断言、退出。
+// 每个用例在临时项目中建立独立草稿。
 const runner = `
 import { pathToFileURL } from 'node:url';
-const project = process.argv[2];
+const formal = process.argv[2];
+let project = formal;
 const { createCanvas } = await import(pathToFileURL(project + '/canvas.mjs').href);
 const server = createCanvas(project);
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const base = 'http://127.0.0.1:' + server.address().port;
 const token = (await (await fetch(base + '/')).text()).match(/const TOKEN = '([^']+)'/)[1];
 const headers = { 'x-canvas-token': token, 'Content-Type': 'application/json', Origin: base };
-const call = async (path, body) => (await fetch(base + path, body ? { method: 'POST', headers, body: JSON.stringify(body) } : { headers })).json();
+const request = async (path, body, id, scopedToken = token) => {
+  const url = new URL(path,base);
+  if(id)url.searchParams.set('draft',id);
+  const auth={...headers,'x-canvas-token':scopedToken};
+  return (await fetch(url,body ? {method:'POST',headers:auth,body:JSON.stringify(body)} : {headers:auth})).json();
+};
+const open = async name => {
+  const draft=await request('/api/drafts/create',{name});
+  if(draft.error)throw Error(draft.error);
+  const html=await (await fetch(base+'/?draft='+draft.id)).text();
+  return {...draft,token:html.match(/const TOKEN = '([^']+)'/)[1]};
+};
+const primary=await open('测试草稿');
+project=primary.path;
+const call=(path,body)=>request(path,body,primary.id,primary.token);
 const plain = async (path, opts) => { const r = await fetch(base + path, opts); return { status: r.status, text: await r.text() }; };
 const cases = (await import(pathToFileURL(project + '/tests/case.mjs').href)).default;
-try { await cases({ call, plain, base, token, project }); }
+try { await cases({ call, plain, base, token, project, formal, primary, open, request }); }
 finally { server.closeAllConnections?.(); server.close(); }
 `;
 
@@ -60,7 +74,7 @@ function withCanvas(name, cases) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-canvas-'));
   const project = join(dir, 'project');
   try {
-    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || basename(path) === 'framework_feedback') });
+    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || basename(path) === 'framework_feedback') });
     seed(project);
     mkdirSync(join(project, 'tests'), { recursive: true }); writeFileSync(join(project, 'tests/case.mjs'), 'export default ' + cases.toString() + ';\n');
     writeFileSync(join(project, 'tests/run-canvas.mjs'), runner);
@@ -203,7 +217,7 @@ test('独立输入输出、建立对应、取消对应、刷新及结构检查',
   await edit({action:'io',node:{id:'upload',type:'input',name:'上传文件',description:'用户提供的文件'}});
   await edit({action:'io',node:{id:'deliver',type:'output',name:'交付',description:'交付给用户'}});
   let l=s.levels[s.root.id];
-  s=await call('/api/save',{levelId:s.root.id,revision:s.revisions[s.root.id],fileRevisions:s.fileRevisions,links:[...l.links,{from:{module:'upload',port:'value'},to:{module:'a',port:'text'},info:'上传文件'}]});
+  s=await call('/api/save',{levelId:s.root.id,revision:s.revisions[s.root.id],fileRevisions:s.fileRevisions,links:[...l.links.filter(e=>e.to.module!=='a'||e.to.port!=='text'),{from:{module:'upload',port:'value'},to:{module:'a',port:'text'},info:'上传文件'}]});
   if(s.error)throw Error(s.error);
   await edit({action:'expose',nodeId:'upload',port:'file'});
   if(!s.levels[s.root.id].links.some(e=>e.from.module==='$self'&&e.from.port==='file'))throw Error('没有改写内部连接');
@@ -276,9 +290,86 @@ test('一键创建自动标识，名称职责稍后设置并写回底层',()=>wi
  const {readFileSync}=await import('node:fs');let s=await call('/api/project');const initial=s.levels[s.root.id].members.map(n=>n.id);
  s=await call('/api/settings',{action:'createModule',levelId:s.root.id,fileRevisions:s.fileRevisions,position:{x:500,y:220}});if(s.error)throw Error(s.error);
  const node=s.levels[s.root.id].members.find(n=>!initial.includes(n.id));if(!node||node.name!=='未命名节点'||!node.id.startsWith('node_'))throw Error('未自动创建');
+ if(node.inputs.length!==1||node.inputs[0].name!=='input'||node.outputs.length!==1||node.outputs[0].name!=='output')throw Error('新节点缺少默认连线端口');
  const before=s.fileRevisions;
  s=await call('/api/settings',{action:'ports',nodeId:node.id,levelId:s.root.id,fileRevisions:before,name:'材料整理',description:'整理材料。\n\n保留关键条件。',inputs:[{name:'source',description:'原料'}],outputs:[]});if(s.error)throw Error(s.error);
  const updated=s.levels[s.root.id].members.find(n=>n.id===node.id);
  if(updated.name!=='材料整理'||updated.inputs.length!==1||!updated.responsibility.includes('关键条件'))throw Error('设置未同步');
  const meta=JSON.parse(readFileSync(project+'/modules/'+node.id+'/module.json'));if(meta.name!=='材料整理'||meta.status!=='pending')throw Error('登记表不一致');
+}));
+test('拖线创建节点同时保存位置和连线，端口失效时不创建',()=>withCanvas('create-connected',async({call})=>{
+ let s=await call('/api/project');
+ const levelId=s.root.id;
+ const target=s.levels[levelId].members.find(n=>n.inputs.length);
+ const create=(endpoint)=>call('/api/settings',{action:'createModule',levelId,fileRevisions:s.fileRevisions,
+   node:{id:'new_source'},position:{x:500,y:220},connect:{direction:'in',endpoint}});
+ const invalid=await create({module:target.id,port:'missing'});
+ if(!invalid.error)throw Error('无效接口被接受');
+ const endpoint={module:target.id,port:target.inputs[0].name};
+ const occupied=await create(endpoint);
+ if(!occupied.error?.includes('已有来源'))throw Error('允许重复输入来源');
+ const links=s.levels[levelId].links.filter(e=>e.to.module!==endpoint.module||e.to.port!==endpoint.port);
+ s=await call('/api/save',{levelId,revision:s.revisions[levelId],fileRevisions:s.fileRevisions,links});
+ if(s.error)throw Error(s.error);
+ s=await create(endpoint);
+ if(s.error)throw Error(s.error);
+ if(s.layout[levelId].new_source.x!==500 || !s.levels[levelId].links.some(e=>e.from.module==='new_source'&&e.from.port==='output'&&e.to.module===endpoint.module&&e.to.port===endpoint.port))throw Error('未保存节点位置或连线');
+ const io=await call('/api/settings',{action:'io',levelId,fileRevisions:s.fileRevisions,node:{id:'new_sink',type:'output',name:'输出',description:'结果'},connect:{direction:'out',endpoint:{module:'new_source',port:'output'}}});
+ if(io.error || !io.levels[levelId].links.some(e=>e.from.module==='new_source'&&e.to.module==='new_sink'&&e.to.port==='value'))throw Error(io.error||'未连接输出节点');
+}));
+
+
+test('显示只读，多份草稿隔离，支持重命名、旧版提示和删除',()=>withCanvas('drafts',async({call,formal,primary,open,request,plain,base,token})=>{
+ const {readFileSync,writeFileSync,existsSync}=await import('node:fs');
+ const before=readFileSync(formal+'/connections.json','utf8');
+ const {readdirSync}=await import('node:fs');
+ const {createHash}=await import('node:crypto');
+ const inventory=dir=>readdirSync(dir,{withFileTypes:true}).filter(e=>e.name!=='.canvas-drafts').flatMap(e=>{
+   const path=dir+'/'+e.name;
+   return e.isDirectory()?inventory(path):[[path,createHash('sha256').update(readFileSync(path)).digest('hex')]];
+ });
+ const formalBefore=JSON.stringify(inventory(formal));
+ const a=await call('/api/project');
+ const body={action:'createModule',levelId:a.root.id,fileRevisions:a.fileRevisions,node:{id:'draft_only'}};
+ const blocked=await request('/api/settings',body);
+ if(!blocked.error?.includes('只读'))throw Error('正式项目可写');
+ const second=await open('另一份草稿');
+ const cross=await plain('/api/settings?draft='+second.id,{method:'POST',headers:{'x-canvas-token':primary.token,Origin:base},body:JSON.stringify(body)});
+ if(cross.status!==403)throw Error('草稿令牌可以跨草稿写入');
+ const edited=await call('/api/settings',body);
+ if(edited.error)throw Error(edited.error);
+ if(!existsSync(primary.path+'/modules/draft_only')||existsSync(second.path+'/modules/draft_only')||existsSync(formal+'/modules/draft_only')||before!==readFileSync(formal+'/connections.json','utf8'))throw Error('草稿写入越界');
+ if(formalBefore!==JSON.stringify(inventory(formal)))throw Error('正式项目文件被草稿操作改变');
+ await request('/api/drafts/rename',{id:second.id,name:'另一方案'});
+ writeFileSync(formal+'/connections.json',before+' ');
+ const list=await request('/api/drafts');
+ if(!list.find(d=>d.id===second.id&&d.stale&&d.name==='另一方案'))throw Error('草稿列表状态不正确');
+ const old=await request('/api/project',null,second.id,second.token);
+ if(old.error||old.levels[old.root.id].members.some(n=>n.id==='draft_only'))throw Error('旧草稿无法继续查看');
+ await request('/api/drafts/delete',{id:second.id});
+ if(existsSync(second.path)||!existsSync(primary.path))throw Error('删除草稿范围不正确');
+}));
+test('新草稿为组合空输入创建外部输入节点，已有来源不重复',()=>withCanvas('combo-source',async({call,open,request,formal})=>{
+ const {mkdirSync,writeFileSync,readFileSync}=await import('node:fs');
+ const dir=formal+'/modules/group';
+ mkdirSync(dir+'/modules',{recursive:true});
+ writeFileSync(dir+'/module.json',JSON.stringify({id:'group',name:'组合',status:'pending'}));
+ writeFileSync(dir+'/README.md','# 组合\n\n## 输入\n\n```interfaces\n[{"name":"material","description":"材料"}]\n```\n\n## 输出\n\n```interfaces\n[]\n```\n');
+ writeFileSync(dir+'/connections.json','{"connections":[]}');
+ const before=readFileSync(formal+'/connections.json','utf8');
+ const draft=await open('组合输入方案');
+ let s=await request('/api/project',null,draft.id,draft.token);
+ const level=s.levels[s.root.id],edge=level.links.find(e=>e.to.module==='group');
+ if(!edge||edge.to.port!=='material'||!level.ioNodes.some(n=>n.id===edge.from.module&&n.type==='input'))throw Error('没有自动创建外部输入');
+ s=await request('/api/settings',{action:'ports',levelId:s.root.id,nodeId:'group',fileRevisions:s.fileRevisions,inputs:[{name:'material',description:'材料'}],outputs:[]},draft.id,draft.token);
+ if(s.error||s.levels[s.root.id].links.filter(e=>e.to.module==='group').length!==1)throw Error('重复创建来源');
+ if(before!==readFileSync(formal+'/connections.json','utf8'))throw Error('修改了正式项目');
+}));
+test('批量删除节点同时清除连线与布局，正式节点保留',()=>withCanvas('delete-nodes',async({call,formal,project})=>{
+ const {existsSync}=await import('node:fs');
+ let s=await call('/api/project');
+ s=await call('/api/settings',{action:'deleteNodes',levelId:s.root.id,fileRevisions:s.fileRevisions,nodeIds:['a','b']});
+ if(s.error)throw Error(s.error);
+ if(s.levels[s.root.id].members.some(n=>['a','b'].includes(n.id))||s.levels[s.root.id].links.length)throw Error('删除后残留节点或连线');
+ if(existsSync(project+'/modules/a')||!existsSync(formal+'/modules/a'))throw Error('删除范围不正确');
 }));

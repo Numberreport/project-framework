@@ -15,7 +15,33 @@ import { randomBytes, createHash } from 'node:crypto';
 let ROOT = dirname(fileURLToPath(import.meta.url));
 const LAYOUT = 'canvas-layout.json';
 const DOCS = ['README.md', 'VALIDATION.md', 'module.json'];
-const filesOf = n => [...new Set([...DOCS, n.meta.implementation, n.meta.verify].filter(f => typeof f === 'string' && f && !isAbsolute(f) && !f.split(/[\\/]/).includes('..') && existsSync(join(n.dir,f)) && statSync(join(n.dir,f)).isFile() && inside(realpathSync(n.dir), realpathSync(join(n.dir,f)))) )];
+function filesOf(node) {
+  const files = new Set();
+  const allowed = new Set(['.md','.json','.py','.js','.mjs','.cjs','.ts','.tsx','.jsx','.css','.html','.txt','.yaml','.yml','.toml','.ps1','.sh']);
+  const skip = new Set(['modules','workspace','node_modules','__pycache__','preferences','history']);
+  const add = file => {
+    if (typeof file !== 'string' || !file || isAbsolute(file) || file.split(/[\\/]/).includes('..')) return;
+    const path = join(node.dir,file);
+    if (!existsSync(path) || !inside(realpathSync(node.dir),realpathSync(path))) return;
+    const stat = statSync(path);
+    if (!stat.isFile() || stat.size > 800000 || readFileSync(path).includes(0)) return;
+    files.add(file.split('\\').join('/'));
+  };
+  [...DOCS,node.meta.implementation,node.meta.verify].forEach(add);
+  const walk = (dir, depth = 0) => {
+    if (depth > 8) return;
+    for (const item of readdirSync(join(node.dir,dir),{withFileTypes:true})) {
+      if (item.isSymbolicLink() || item.name.startsWith('.') || skip.has(item.name)) continue;
+      const file = dir ? dir + '/' + item.name : item.name;
+      const path = join(node.dir,file);
+      if (!inside(realpathSync(node.dir),realpathSync(path))) continue;
+      if (item.isDirectory()) walk(file,depth+1);
+      else if (allowed.has(item.name.slice(item.name.lastIndexOf('.')).toLowerCase())) add(file);
+    }
+  };
+  walk('');
+  return [...files];
+}
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 const inside = (base, target) => { const r = relative(base, target); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
 const rel = (path) => relative(ROOT, path).split(sep).join('/') || '.';
@@ -192,7 +218,7 @@ function markdownFiles(dir) {
   return found;
 }
 
-const writeAtomic = (path, content) => { const tmp = path + '.tmp-' + process.pid; writeFileSync(tmp, content); renameSync(tmp, path); };
+const writeAtomic = (path, content) => { const tmp = path + '.tmp-' + process.pid; writeFileSync(tmp, content, {flag:'wx'}); try { renameSync(tmp, path); } catch (error) { rmSync(tmp,{force:true}); throw error; } };
 
 // 真正写盘。任何一步失败就把已做的改动退回去。
 export function applyPack(tree, plan) {
@@ -285,7 +311,20 @@ function saveLevel({ levelId, links, stop, positions, revision, fileRevisions })
     if (e.kind !== undefined && !['support','return'].includes(e.kind)) throw Error('连接类型无效');
     if (!String(e.info || '').trim()) throw Error('每条连接都要写传的是什么');
   }
-  const next = { ...readJson(file), connections: links };
+  const stored = readJson(file);
+  const inputs = new Set();
+  for (const edge of links) {
+    const key = JSON.stringify([edge.to.module,edge.to.port]);
+    if (inputs.has(key)) {
+      const incoming = links.filter(e => e.to.module === edge.to.module && e.to.port === edge.to.port);
+      const old = stored.connections.filter(e => e.to.module === edge.to.module && e.to.port === edge.to.port);
+      if (incoming.length > old.length || incoming.some(e => !old.some(o => o.from.module === e.from.module && o.from.port === e.from.port))) {
+        throw Error('每个输入端口只能接收一个来源：' + edge.to.module + '.' + edge.to.port);
+      }
+    }
+    inputs.add(key);
+  }
+  const next = { ...stored, connections: links };
   delete next.stop;
   if (String(stop || '').trim()) next.stop = String(stop).trim();
   const changes = new Map([[file, JSON.stringify(next, null, 2) + '\n']]);
@@ -297,6 +336,34 @@ function saveLevel({ levelId, links, stop, positions, revision, fileRevisions })
   }
   transaction(changes);
   return snapshot();
+}
+
+function addCombinationSources() {
+  const tree = loadTree();
+  const layout = readLayout();
+  const changes = new Map();
+  for (const parent of flatten(tree).filter(node => node.isCombo)) {
+    const record = readJson(join(parent.dir,'connections.json'));
+    let changed = false;
+    for (const combination of parent.children.filter(node => node.isCombo)) {
+      for (const [index, port] of combination.inputs.entries()) {
+        if (record.connections.some(edge => edge.to.module === combination.id && edge.to.port === port.name)) continue;
+        const id = 'input_' + randomBytes(8).toString('hex');
+        record.ioNodes ||= [];
+        record.ioNodes.push({id,type:'input',name:port.name,description:port.description});
+        record.connections.push({from:{module:id,port:'value'},to:{module:combination.id,port:port.name},info:port.description});
+        layout[parent.id] ||= {};
+        const position = layout[parent.id][combination.id] || {x:370,y:70};
+        layout[parent.id][id] = {x:position.x-400,y:position.y+index*190};
+        changed = true;
+      }
+    }
+    if (changed) changes.set(join(parent.dir,'connections.json'),JSON.stringify(record,null,2)+'\n');
+  }
+  if (changes.size) {
+    changes.set(join(ROOT,LAYOUT),JSON.stringify(layout,null,2)+'\n');
+    transaction(changes);
+  }
 }
 
 function snapshot() {
@@ -314,7 +381,7 @@ function snapshot() {
     root: { id: tree.id, name: tree.name, label: tree.label },
     levels, layout,
     revisions: Object.fromEntries(Object.keys(levels).map(id => [id, hash(pick(join(findNode(tree, id).dir, 'connections.json')))])),
-    docs: Object.fromEntries(flatten(tree).map(n => [n.id, { name: n.name, label: n.label, files: filesOf(n) }])),
+    docs: Object.fromEntries(flatten(tree).map(n => [n.id, { name: n.name, label: n.label, implementation:n.meta.implementation || null, verify:n.meta.verify || null, files: filesOf(n) }])),
   };
 }
 
@@ -362,6 +429,36 @@ export function editStructure(data) {
   assertRevisions(data.fileRevisions);
   const tree = loadTree(), owner = findNode(tree, data.levelId);
   if (!owner?.isCombo) throw Error('层不存在');
+  if (data.action === 'deleteNodes') {
+    const ids = new Set(data.nodeIds);
+    const members = owner.children.filter(node => ids.has(node.id));
+    const io = (owner.ioNodes || []).filter(node => ids.has(node.id));
+    if (!ids.size || members.length + io.length !== ids.size) throw Error('只能删除当前层的节点');
+    const record = readJson(join(owner.dir,'connections.json'));
+    record.ioNodes = (record.ioNodes || []).filter(node => !ids.has(node.id));
+    record.connections = record.connections.filter(edge => !ids.has(edge.from.module) && !ids.has(edge.to.module));
+    const layout = readLayout();
+    for (const id of ids) if (layout[owner.id]) delete layout[owner.id][id];
+    for (const node of members.flatMap(flatten)) delete layout[node.id];
+    const trash = join(ROOT,'.canvas-trash',randomBytes(12).toString('hex'));
+    mkdirSync(trash,{recursive:true});
+    const moved = [];
+    try {
+      for (const member of members) {
+        const target = join(trash,member.id);
+        renameSync(member.dir,target);
+        moved.push([member.dir,target]);
+      }
+      transaction(new Map([
+        [join(owner.dir,'connections.json'),JSON.stringify(record,null,2)+'\n'],
+        [join(ROOT,LAYOUT),JSON.stringify(layout,null,2)+'\n'],
+      ]));
+    } catch (error) {
+      for (const [original,target] of moved.reverse()) renameSync(target,original);
+      throw error;
+    }
+    return snapshot();
+  }
   const changes = new Map(), records = new Map();
   let createdDirectory = null;
   const record = n => { if (!records.has(n.id)) records.set(n.id, { node: n, data: readJson(join(n.dir, 'connections.json')) }); return records.get(n.id).data; };
@@ -379,24 +476,54 @@ export function editStructure(data) {
       return [e];
     });
   };
+  const placeNode = id => {
+    const position = data.position;
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
+    const layout = readLayout();
+    layout[owner.id] ||= {};
+    layout[owner.id][id] = { x:position.x, y:position.y };
+    changes.set(join(ROOT,LAYOUT),JSON.stringify(layout,null,2)+'\n');
+  };
+  const attachNewNode = (id, newPorts) => {
+    if (!data.connect) return;
+    const { endpoint, direction } = data.connect;
+    if (!['in','out'].includes(direction) || !endpoint) throw Error('连接端点无效');
+    const member = owner.children.find(n => n.id === endpoint.module);
+    const io = owner.ioNodes?.find(n => n.id === endpoint.module);
+    const ports = endpoint.module === '$self' ? { inputs:owner.outputs, outputs:owner.inputs } : member || (io && ioPorts(io));
+    const existingPort = ports?.[direction === 'out' ? 'outputs' : 'inputs']?.find(p => p.name === endpoint.port);
+    const newPort = newPorts[direction === 'out' ? 'inputs' : 'outputs']?.[0];
+    if (!existingPort || !newPort) throw Error('接口不存在或方向不匹配');
+    const existing = { module:endpoint.module, port:endpoint.port };
+    const fresh = { module:id, port:newPort.name };
+    const source = direction === 'out' ? existingPort : newPort;
+    const target = direction === 'out' ? fresh : existing;
+    const connections = record(owner).connections;
+    if (connections.some(e => e.to.module === target.module && e.to.port === target.port)) {
+      throw Error('这个输入端口已有来源，请先删除旧连线');
+    }
+    connections.push({
+      from:direction === 'out' ? existing : fresh,
+      to:target,
+      info:source.description?.trim() || source.name,
+    });
+  };
   if (data.action === 'createModule') {
     const { id = 'node_' + randomBytes(6).toString('hex'), name = '未命名节点', description = '待补充：说明本节点负责什么。' } = data.node || {};
     if (!validId(id) || typeof name !== 'string' || !name.trim() || typeof description !== 'string' || !description.trim()) throw Error('请填写有效标识、名称和职责');
     if (flatten(tree).some(n => n.id === id || (n.ioNodes || []).some(io => io.id === id))) throw Error('节点标识已被占用');
     const dir = join(owner.dir, 'modules', id);
     if (!inside(realpathSync(ROOT), dir) || existsSync(dir)) throw Error('目标模块目录不可用');
-    const block = '```interfaces\n[]\n```';
+    const inputBlock = '```interfaces\n[{ "name": "input", "description": "待处理的材料" }]\n```';
+    const outputBlock = '```interfaces\n[{ "name": "output", "description": "处理后的结果" }]\n```';
     const files = {
       'module.json': JSON.stringify({ id, name:name.trim(), template:{id:'project-framework',version:'3.0.0'}, status:'pending' },null,2) + '\n',
-      'README.md': '# ' + name.trim() + '\n\n## 职责\n\n' + description.trim() + '\n\n## 输入\n\n' + block + '\n\n## 输出\n\n' + block + '\n\n## 处理流程\n\n待补充：说明如何处理输入并交付输出。\n\n## 没完成时\n\n缺少材料或处理规则时停止，说明缺少什么。\n',
+      'README.md': '# ' + name.trim() + '\n\n## 职责\n\n' + description.trim() + '\n\n## 输入\n\n' + inputBlock + '\n\n## 输出\n\n' + outputBlock + '\n\n## 处理流程\n\n待补充：说明如何处理输入并交付输出。\n\n## 没完成时\n\n缺少材料或处理规则时停止，说明缺少什么。\n',
       'VALIDATION.md': '# 检查标准\n\n待补充：说明怎样判断本模块的交付合格。完成后将 module.json 的 status 改为 ready。\n',
     };
     for (const [file, content] of Object.entries(files)) changes.set(join(dir,file),content);
-    if (data.position && Number.isFinite(data.position.x) && Number.isFinite(data.position.y)) {
-      const layout = readLayout(); layout[owner.id] ||= {};
-      layout[owner.id][id] = { x:Math.max(0,data.position.x),y:Math.max(0,data.position.y) };
-      changes.set(join(ROOT,LAYOUT),JSON.stringify(layout,null,2)+'\n');
-    }
+    placeNode(id);
+    attachNewNode(id, { inputs:[{name:'input'}], outputs:[{name:'output',description:'处理后的结果'}] });
     createdDirectory = dir;
   } else if (data.action === 'ports') {
     const n = findNode(tree, data.nodeId);
@@ -432,6 +559,10 @@ export function editStructure(data) {
       if (existing && existing.type !== n.type) throw Error('不能更改节点方向，请新建另一类节点');
       if (!existing && flatten(tree).some(x => x.id === n.id || (x.ioNodes || []).some(io => io.id === n.id))) throw Error('标识已被模块占用');
       r.ioNodes = r.ioNodes.filter(x => x.id !== n.id); r.ioNodes.push(n); validateIO(r.ioNodes);
+      if (!existing) {
+        placeNode(n.id);
+        attachNewNode(n.id,ioPorts(n));
+      }
     } else if (data.action === 'deleteIO') {
       if (!r.ioNodes.some(n => n.id === data.nodeId)) throw Error('节点不存在');
       r.ioNodes = r.ioNodes.filter(n => n.id !== data.nodeId);
@@ -466,48 +597,140 @@ export function editStructure(data) {
 
 // ---- HTTP 服务 --------------------------------------------------------------
 
+function inProject(root, operation) {
+  const previous = ROOT;
+  ROOT = root;
+  try { return operation(); } finally { ROOT = previous; }
+}
+
 export function createCanvas(rootDir = ROOT) {
-  ROOT = rootDir;
-  const token = randomBytes(24).toString('hex');
+  const formal = realpathSync(rootDir);
+  const drafts = join(formal, '.canvas-drafts');
+  const secret = randomBytes(24).toString('hex');
+  const tokenFor = id => hash(secret + ':' + (id || 'display'));
+  const formalVersion = () => inProject(formal, () => hash(JSON.stringify(revisions(loadTree()))));
+  const folder = id => {
+    if (!/^[a-f0-9]{24}$/.test(id || '')) throw Error('草稿标识无效');
+    if (realpathSync(drafts) !== drafts) throw Error('草稿目录不可用');
+    const path = join(drafts,id);
+    if (!existsSync(path) || realpathSync(path) !== path) throw Error('草稿不存在');
+    return path;
+  };
+  const metadata = path => readJson(join(path,'.draft.json'));
+  const writeMetadata = (path, meta) => writeAtomic(join(path,'.draft.json'), JSON.stringify(meta,null,2)+'\n');
+  const draftName = name => {
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) throw Error('请填写草稿名称（最多 80 字）');
+    return name.trim();
+  };
+  const list = () => {
+    if (!existsSync(drafts)) return [];
+    if (realpathSync(drafts) !== drafts) throw Error('草稿目录不可用');
+    const version = formalVersion();
+    return readdirSync(drafts,{withFileTypes:true}).filter(e=>e.isDirectory() && /^[a-f0-9]{24}$/.test(e.name))
+      .map(e=>{const path=folder(e.name), meta=metadata(path);return meta && {...meta,id:e.name,path,stale:meta.base!==version};})
+      .filter(Boolean).sort((a,b)=>b.savedAt.localeCompare(a.savedAt));
+  };
+  const copyDraft = name => {
+    const id = randomBytes(12).toString('hex');
+    const base = formalVersion();
+    mkdirSync(drafts,{recursive:true});
+    if (realpathSync(drafts) !== drafts) throw Error('草稿目录不可用');
+    const path = join(drafts,id);
+    const excluded = new Set(['workspace','node_modules','__pycache__','runs','outputs','dist','build','credentials.json','secrets.json']);
+    mkdirSync(path);
+    try {
+      for (const entry of readdirSync(formal,{withFileTypes:true})) {
+        if (entry.name.startsWith('.') || excluded.has(entry.name) || entry.isSymbolicLink()) continue;
+        cpSync(join(formal,entry.name),join(path,entry.name),{recursive:true,filter:source=>{
+          const name=source.split(sep).at(-1);
+          return !name.startsWith('.') && !excluded.has(name) && !/\.(pem|key)$/i.test(name) && realpathSync(source)===source;
+        }});
+      }
+      if (formalVersion() !== base || inProject(path,()=>hash(JSON.stringify(revisions(loadTree())))) !== base) throw Error('项目在复制期间发生变化，请重试');
+      inProject(path,addCombinationSources);
+      writeMetadata(path,{name,base,savedAt:new Date().toISOString()});
+      return {id,path};
+    } catch (error) {
+      rmSync(path,{recursive:true,force:true});
+      throw error;
+    }
+  };
   return createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const origin = 'http://127.0.0.1:' + req.socket.localPort;
     if (req.headers.host !== origin.slice(7) || (req.headers.origin && req.headers.origin !== origin)) { res.writeHead(403).end(); return; }
     try {
-      if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))) {
+      const url = new URL(req.url,origin);
+      const route = url.pathname;
+      const id = url.searchParams.get('draft');
+      const token = tokenFor(id);
+      if (req.method === 'GET' && route === '/') {
+        if (id) folder(id);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.end(PAGE().replace('__TOKEN__', token));
+        res.end(PAGE().replace('__TOKEN__',token));
         return;
       }
       if (req.headers['x-canvas-token'] !== token) { res.writeHead(403).end(); return; }
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      if (req.method === 'GET' && req.url === '/api/project') { res.end(JSON.stringify(snapshot())); return; }
-      if (req.method === 'GET' && req.url.startsWith('/api/doc?')) {
-        const url = new URL(req.url, origin);
-        const id = url.searchParams.get('id'), name = url.searchParams.get('file');
-        const node = findNode(loadTree(), id);
-        if (!node || !filesOf(node).includes(name)) throw Error('没有这个文件');
-        res.end(JSON.stringify({ name, path: rel(join(node.dir, name)), content: readText(join(node.dir, name)) }));
+      if (req.method === 'GET' && route === '/api/drafts') { res.end(JSON.stringify(list())); return; }
+      if (req.method === 'GET') {
+        const root = id ? folder(id) : formal;
+        const result = inProject(root,()=>{
+          if (route === '/api/project') return {...snapshot(),draftId:id};
+          if (route !== '/api/doc') return;
+          const node = findNode(loadTree(),url.searchParams.get('id'));
+          const name = url.searchParams.get('file');
+          if (!node || !filesOf(node).includes(name)) throw Error('没有这个文件');
+          return {name,path:rel(join(node.dir,name)),content:readText(join(node.dir,name))};
+        });
+        if (result === undefined) { res.writeHead(404).end(); return; }
+        res.end(JSON.stringify(result));
         return;
       }
       if (req.method !== 'POST') { res.writeHead(404).end(); return; }
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 2e6) throw Error('内容过大'); }
       const data = body ? JSON.parse(body) : {};
-      if (req.url === '/api/settings') { res.end(JSON.stringify(editStructure(data))); return; }
-      if (req.url === '/api/save') { res.end(JSON.stringify(saveLevel(data))); return; }
-      if (req.url === '/api/pack-preview') {
-        res.end(JSON.stringify(describe(planPack(loadTree(), data))));
-        return;
+      if (route === '/api/drafts/create') { res.end(JSON.stringify(copyDraft(draftName(data.name)))); return; }
+      if (route === '/api/drafts/rename') {
+        const path=folder(data.id);
+        writeMetadata(path,{...metadata(path),name:draftName(data.name)});
+        res.end(JSON.stringify({ok:true})); return;
       }
-      if (req.url === '/api/pack') {
-        const plan = planPack(loadTree(), data);
-        const result = applyPack(loadTree(), plan);
-        res.end(JSON.stringify({ done: describe(plan), ...result }));
-        return;
+      if (route === '/api/drafts/delete') {
+        rmSync(folder(data.id),{recursive:true,force:true});
+        res.end(JSON.stringify({ok:true})); return;
       }
-      res.writeHead(404).end();
+      if (!['/api/settings','/api/save','/api/pack-preview','/api/pack'].includes(route)) { res.writeHead(404).end(); return; }
+      if (!id) { res.writeHead(403).end(JSON.stringify({error:'显示模式只读，请打开草稿编辑'})); return; }
+      const root = folder(id);
+      const verifyDirectories = dir => {
+        for (const entry of readdirSync(dir,{withFileTypes:true})) {
+          const path = join(dir,entry.name);
+          if (entry.isSymbolicLink()) throw Error('草稿包含链接文件，请移除后重试');
+          if (entry.isDirectory()) verifyDirectories(path);
+        }
+      };
+      verifyDirectories(root);
+      const result = inProject(root,()=>{
+        if (route === '/api/settings') {
+          editStructure(data);
+          if (['ports','expose','createModule','io'].includes(data.action)) addCombinationSources();
+          return snapshot();
+        }
+        if (route === '/api/save') return saveLevel(data);
+        const tree=loadTree(), plan=planPack(tree,data);
+        if (route === '/api/pack-preview') return describe(plan);
+        const applied = applyPack(tree,plan);
+        addCombinationSources();
+        return {done:describe(plan),...applied,...snapshot()};
+      });
+      if (route !== '/api/pack-preview') {
+        try { writeMetadata(root,{...metadata(root),savedAt:new Date().toISOString()}); }
+        catch { /* 草稿内容已经保存，保留原时间。 */ }
+      }
+      res.end(JSON.stringify(result));
     } catch (e) { res.writeHead(400).end(JSON.stringify({ error: e.message })); }
   });
 }

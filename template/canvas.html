@@ -2,18 +2,23 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>项目画布</title>
 <style>
   [hidden] { display:none !important; }
+  #board, #edges, #side, #drawerToggle, #zoomControls, #composeSelection { user-select: none; -webkit-user-select: none; }
+  input, textarea, [contenteditable="true"], #panel pre { user-select: text; -webkit-user-select: text; }
   #board { pointer-events:none; }
   #board > .node { pointer-events:auto; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; color: #222; background: #f4f3ef; display: flex; height: 100vh; overflow: hidden; }
-  #side { width: 300px; flex-shrink: 0; transition: margin-left .2s ease; position: relative; z-index: 2; background: #fff; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
-  #side.closed { margin-left: -300px; visibility: hidden; }
-  #drawerToggle { position: fixed; left: 308px; top: 12px; z-index: 3; box-shadow: 0 2px 8px #0001; transition: left .2s ease; }
-  #side.closed + #drawerToggle { left: 12px; }
-  @media (prefers-reduced-motion: reduce) { #side, #drawerToggle { transition: none; } }
+  #side { width: 300px; max-width: 100vw; position: fixed; left: 0; top: 56px; bottom: 0; z-index: 5; background: #fff; border-right: 1px solid #ddd; box-shadow: 4px 0 16px #0001; display: flex; flex-direction: column; transition: transform .2s ease, visibility .2s; }
+  #side.closed { transform: translateX(-100%); visibility: hidden; }
+  #canvasNavigation { position:fixed; left:12px; top:12px; z-index:6; display:flex; gap:8px; }
+  #drawerToggle { box-shadow: 0 2px 8px #0001; }
+  #drawerToggle[aria-expanded="true"] { background: #eaf2f7; border-color: #42839c; color: #203747; }
+  #drawerBackdrop { position: fixed; inset: 0; z-index: 4; }
+  @media (prefers-reduced-motion: reduce) { #side { transition: none; } }
   #side h1 { font-size: 15px; margin: 0; padding: 14px 16px; border-bottom: 1px solid #eee; }
   #breadcrumb { padding: 8px 16px; color: #666; font-size: 13px; border-bottom: 1px solid #eee; }
   #breadcrumb a { color: #0366d6; cursor: pointer; }
@@ -29,8 +34,9 @@
   button:hover { background: #f0f0ee; }
   button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
   button:disabled { opacity: .5; cursor: not-allowed; }
+  #stage.panning, #stage.panning * { cursor: grabbing !important; user-select: none; }
   #stage { flex: 1; position: relative; overflow: hidden; }
-  #edges { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #edges { overflow:visible; position: absolute; inset: 0; width: 100%; height: 100%; }
   #edges path.line { fill: none; stroke: #999; stroke-width: 1.6; }
   #edges path.line:hover { stroke: #2f6feb; stroke-width: 3; cursor: pointer; }
   #edges text { font-size: 11px; fill: #666; pointer-events: none; }
@@ -61,7 +67,7 @@
   #packForm label { display: block; margin: 8px 0 4px; font-size: 13px; }
   #packForm input { width: 100%; padding: 6px 8px; font: inherit; border: 1px solid #ccc; border-radius: 4px; }
   #stage { overflow: auto; background-image: radial-gradient(#cdd9e1 .8px, transparent .8px); background-size: 20px 20px; min-width: 0; }
-  .node { width: 300px; border-color: #aebfcd; border-radius: 10px; box-shadow: 0 3px 12px #22334410; }
+  .node { width: 340px; border-color: #aebfcd; border-radius: 10px; box-shadow: 0 3px 12px #22334410; }
   .node .head { background: #eaf2f7; border-radius: 10px 10px 0 0; color: #203747; font-size: 17px; }
   .node .ports { display: grid; grid-template-columns: 1fr 1fr; }
   .port { min-height: 32px; overflow-wrap: anywhere; }
@@ -73,15 +79,12 @@
   .inline-canvas { width: 100%; height: 540px; border: 0; border-top: 1px solid #aebfcd; display: block; }
   .node.selected { outline: 3px solid #42839c; }
   #edges .edge .line { stroke: #177c91; stroke-width: 2; }
-  #edges .edge.support .line { stroke: #7a8794; stroke-dasharray: 5 4; }
-  #edges .edge.return .line { stroke: #b76a28; stroke-dasharray: 7 4; }
   #edges .hit { fill: none; stroke: transparent; stroke-width: 16; cursor: pointer; }
   #edges .edge text { display: none; paint-order: stroke; stroke: white; stroke-width: 5px; }
   #edges .edge:hover text { display: block; }
   #edges .edge:hover .line { stroke-width: 4; }
   .boundary-focus { outline:3px solid #d2a14b; }
   .port.connecting { background:#d5eee2; outline:2px solid #42839c; }
-  #edgeDialog label { display:block; margin:12px 0; }
   .gear { float:right; padding:0 5px; border:0; background:transparent; font-size:19px; }
   .io-input .head { background:#d5eee2; }
   .io-output .head { background:#f6e9cb; }
@@ -89,14 +92,139 @@
   .ports small { padding:0 10px; color:#778899; }
   #board { min-width:1250px; min-height:900px; }
   #settingsDialog { width:700px; max-width:95vw; max-height:90vh; overflow:auto; }
-  .port-edit { display:grid; grid-template-columns:1fr 2fr auto; gap:8px; margin:8px 0; }
+  .port-edit { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2fr) 44px; gap:8px; margin:8px 0; }
   #settingsDialog input,#settingsDialog textarea { font:inherit; width:100%; padding:6px; }
   #contextMenu { position:fixed; z-index:10; padding:6px; background:white; border:1px solid #ccd; border-radius:6px; box-shadow:0 4px 12px #0002; }
   #contextMenu button { display:block; width:100%; }
+
+  /* 与提示词工作台的项目结构画布保持一致；只统一外观。 */
+  body { color:#243746; background:#f5f7fa; }
+  button, select, input, textarea { font:inherit; color:#243746; background:#fff; border:1px solid #cad5df; border-radius:6px; padding:7px; }
+  button:hover { background:#edf4f7; }
+  button.primary { background:#296b81; border-color:#296b81; color:#fff; }
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid #42839c; outline-offset:2px; }
+  #side { border-color:#d8e0e7; box-shadow:4px 0 16px #22334410; }
+  #side h1 { color:#203747; border-color:#d8e0e7; }
+  #breadcrumb, .member, #side .actions { border-color:#edf1f5; }
+  #breadcrumb, .member .sum { color:#65798b; }
+  #breadcrumb a { color:#24657b; }
+  .member:hover { background:#edf4f7; }
+  #side > button { margin:5px 12px; text-align:left; }
+  #drawerToggle { box-shadow:0 3px 12px #2233440a; }
+  .node { background:#fff; box-shadow:0 3px 12px #2233440a; }
+  .node .head { padding:12px; min-height:64px; font-size:22px; line-height:1.4; border-color:#edf1f5; touch-action:none; }
+  .node .head small { margin-top:4px; color:#65798b; font-size:12px; overflow-wrap:anywhere; }
+  .node .ports { padding:4px 0; min-height:36px; }
+  .node .ports > div { min-width:0; }
+  .node .ports > div + div { border-left:1px solid #edf1f5; }
+  .port { gap:8px; padding:5px 8px; font-size:13px; line-height:1.5; min-height:32px; color:#243746; cursor:crosshair; touch-action:none; }
+  .port:hover { background:#e8f3f5; }
+  .ports small { color:#748596; font-size:11px; }
+  .dot, .dot.in { width:11px; height:11px; background:#fff; border:2px solid #42839c; box-shadow:none; }
+  .gear { color:#375267; padding:0 5px; border:0; background:transparent; font-size:19px; }
+  .node-actions { padding:6px 10px 10px; border-color:#edf1f5; }
+  .node-actions button { font-size:12px; }
+  .node.io-input, .node.io-output { border-radius:28px; border:2px solid #5d9c83; background:#f5fcf8; }
+  .node.io-output { border-color:#b08b45; background:#fffaf0; }
+  .io-input .head, .io-output .head { border-radius:26px 26px 0 0; }
+  .io-input .head { background:#ddf1e6; }
+  .io-output .head { background:#f8edcf; }
+  .io-input .head::before { content:'●'; margin-right:8px; color:#398364; }
+  .io-output .head::before { content:'◎'; margin-right:8px; color:#9c7326; }
+  .io-input .ports, .io-output .ports { grid-template-columns:1fr; }
+  .io-input .ports > div:first-child, .io-output .ports > div:last-child, .io-input .node-actions, .io-output .node-actions { display:none; }
+  .io-input .ports > div + div { border-left:0; }
+  .io-description { color:#65798b; }
+  #edges .edge .line { stroke:#478e9e; stroke-width:2.2; }
+  #edges .edge:hover .line { stroke:#087c9b; stroke-width:4; }
+  #edges text { fill:#354f60; font:12px system-ui; }
+  .inline-canvas { border-color:#aebfcd; }
+  #panel { width:min(440px, 100%); border-color:#d8e0e7; color:#243746; box-shadow:-4px 0 16px #2233440a; }
+  #panel .path { color:#65798b; }
+  #panel .tabs button.on { background:#e1f0f5; border-color:#34839a; color:#243746; }
+  #panel pre { background:#f5f7fa; border-color:#dce5eb; border-radius:6px; font:13px/1.7 system-ui; }
+  dialog { width:650px; max-width:calc(100vw - 24px); max-height:90vh; overflow:auto; padding:18px; background:#fff; color:#243746; border-color:#aebfcd; border-radius:12px; box-shadow:0 6px 22px #22334420; }
+  dialog::backdrop { background:#0009; }
+  dialog h3 { font-size:16px; color:#203747; }
+  dialog code { background:#edf4f7; }
+  #packForm input, #settingsDialog input, #settingsDialog textarea { padding:7px; border:1px solid #cad5df; border-radius:6px; }
+  #settingsDialog { max-width:calc(100vw - 24px); }
+  #contextMenu { border-color:#cad5df; box-shadow:0 6px 22px #22334420; }
+  #zoomControls { border:1px solid #cad5df; border-radius:6px; padding:4px; box-shadow:0 3px 12px #2233440a; display:flex; align-items:center; gap:8px; }
+  #status { background:#fff; color:#627b8b; border:1px solid #d8e0e7; box-shadow:0 3px 12px #22334410; }
+  @media(max-width:600px) { .port-edit { grid-template-columns:minmax(0,1fr) minmax(0,1fr) 44px; gap:4px; } #panel { padding:12px; } }
+  #edges .edge-label { display:none; pointer-events:none; }
+  #edges .edge:hover .edge-label { display:block; }
+  #edges .edge-label rect { fill:#fff; stroke:#75a9b6; }
+  #edges .edge-label text { display:block; fill:#354f60; stroke:none; font:12px system-ui; }
+  #saveStatus { position:fixed; right:16px; top:12px; z-index:3; padding:6px 10px; border:1px solid #d8e0e7; border-radius:6px; background:#fff; color:#627b8b; font-size:12px; pointer-events:none; }
+  .port-columns { font-size:12px; color:#65798b; margin-bottom:4px; }
+  .port-edit input { min-width:0; }
+  #panel { position:fixed; inset:0; margin:auto; width:94vw; max-width:1400px; height:90vh; max-height:90vh; padding:18px; border:1px solid #aebfcd; border-radius:12px; overflow:hidden; }
+  #panel:not([open]) { display:none; }
+  #panel[open] { display:flex; flex-direction:column; }
+  #panel .file-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+  #panel h2 { font-size:18px; margin:0; }
+  .file-inventory { font-size:13px; color:#536c7d; margin:8px 0 12px; }
+  .file-layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:18px; flex:1; min-height:0; }
+  #fileCatalog { overflow:auto; border-right:1px solid #d9e2e8; padding-right:12px; }
+  #fileCatalog h3 { font-size:14px; margin:14px 0 5px; color:#315a71; }
+  #fileCatalog h3:first-child { margin-top:0; }
+  #fileCatalog button { display:block; width:100%; text-align:left; margin:4px 0; padding:7px 9px; overflow-wrap:anywhere; }
+  #fileCatalog button[aria-pressed="true"] { background:#e1f0f5; border-color:#34839a; }
+  #fileCatalog small { display:block; color:#687d8b; font-size:11px; margin-top:3px; }
+  .file-content { min-width:0; min-height:0; display:flex; flex-direction:column; }
+  #panel .path { overflow-wrap:anywhere; flex:none; }
+  #panel pre { flex:1; min-height:0; margin:0; padding:12px; overflow:auto; white-space:pre; font:14px/1.5 monospace; background:#fff; border:1px solid #cad5df; }
+  @media(max-width:700px) { .file-layout { grid-template-columns:180px minmax(0,1fr); gap:12px; } }
+  @media(max-width:480px) { #panel { padding:12px; } .file-layout { grid-template-columns:110px minmax(0,1fr); gap:8px; } }
+  .file-missing { color:#a05c26; font-size:12px; overflow-wrap:anywhere; }
+  .file-root { font-weight:600; color:#315a71; margin-bottom:10px; overflow-wrap:anywhere; }
+  .file-folder { margin:4px 0; }
+  .file-folder summary { cursor:pointer; color:#315a71; padding:6px 2px; overflow-wrap:anywhere; user-select:none; }
+  .file-folder summary:hover { background:#edf4f7; border-radius:4px; }
+  .file-children { margin-left:12px; padding-left:8px; border-left:1px solid #d9e2e8; }
+  .body-badge { display:inline-block; margin-left:6px; padding:1px 4px; border-radius:4px; background:#e1f0f5; color:#24657b; font-size:10px; }
+  .body-layout { display:grid; grid-template-columns:200px minmax(0,1fr); gap:14px; min-height:0; flex:1; }
+  .body-layout.single-file { grid-template-columns:minmax(0,1fr); }
+  .file-viewer { min-width:0; min-height:0; display:flex; flex-direction:column; }
+  #bodyTree { min-width:0; overflow:auto; border-right:1px solid #d9e2e8; padding-right:10px; }
+  #bodyTree button { display:block; width:100%; text-align:left; margin:4px 0; padding:7px 9px; overflow-wrap:anywhere; }
+  #bodyTree button[aria-pressed="true"] { background:#e1f0f5; border-color:#34839a; }
+  #bodyTree small { display:block; color:#687d8b; font-size:11px; }
+  #panel .file-layout { grid-template-columns:150px minmax(0,1fr); }
+  @media(max-width:700px) { #panel .file-layout { grid-template-columns:100px minmax(0,1fr); } .body-layout { grid-template-columns:1fr; grid-template-rows:minmax(80px,25%) minmax(0,1fr); } .body-layout.single-file { grid-template-rows:1fr; } #bodyTree { border-right:0; border-bottom:1px solid #d9e2e8; } }
+  .selection-box { position:fixed; z-index:3; pointer-events:none; border:1px solid #42839c; background:#42839c20; }
+  .node.expanded { display:flex; flex-direction:column; }
+  .node.expanded > .head, .node.expanded > .ports, .node.expanded > .node-actions { flex-shrink:0; }
+  .node.expanded > .inline-canvas { flex:1 1 540px; min-height:120px; border-radius:0 0 10px 10px; }
+  .resize-handle { display:none; position:absolute; z-index:5; touch-action:none; }
+  .expanded > .resize-handle { display:block; }
+  .resize-handle.n, .resize-handle.s { left:8px; right:8px; height:10px; cursor:ns-resize; }
+  .resize-handle.n { top:-5px; } .resize-handle.s { bottom:-5px; }
+  .resize-handle.e, .resize-handle.w { top:8px; bottom:8px; width:10px; cursor:ew-resize; }
+  .resize-handle.e { right:-5px; } .resize-handle.w { left:-5px; }
+  .resize-handle.ne, .resize-handle.nw, .resize-handle.se, .resize-handle.sw { width:16px; height:16px; }
+  .resize-handle.ne { top:-5px; right:-5px; cursor:nesw-resize; } .resize-handle.sw { bottom:-5px; left:-5px; cursor:nesw-resize; }
+  .resize-handle.nw { top:-5px; left:-5px; cursor:nwse-resize; } .resize-handle.se { bottom:-5px; right:-5px; cursor:nwse-resize; }
+  .resizing iframe { pointer-events:none; }
+  #linkMenu { position:fixed; z-index:12; width:min(300px,calc(100vw - 16px)); max-height:min(320px,calc(100vh - 16px)); overflow:auto; background:white; border:1px solid #cad5df; border-radius:8px; padding:8px; box-shadow:0 4px 12px #0002; }
+  #linkMenu button { display:block; width:100%; text-align:left; margin-top:4px; overflow-wrap:anywhere; }
+  #status:popover-open { display:block; position:fixed; inset:60px auto auto 50%; transform:translateX(-50%); margin:0; width:max-content; max-width:calc(100vw - 24px); padding:10px 16px; border:1px solid #265569; border-radius:8px; background:#203e4d; color:#fff; font-size:14px; font-weight:600; box-shadow:0 4px 16px #22334445; pointer-events:none; overflow-wrap:anywhere; }
+  #status.warning:popover-open { background:#7b331c; border-color:#7b331c; }
+  .port.port-blocked { background:#fff0e8; outline:2px solid #b55a32; outline-offset:-2px; }
+  .display-mode #levelSettings, .display-mode #save, .display-mode #pack, .display-mode #composeSelection, .display-mode [data-settings], .display-mode [data-check], .display-mode .resize-handle { display:none!important; }
+  .display-mode .node .head, .display-mode .port, .display-mode .dot, .display-mode #edges .hit { cursor:default!important; }
+  #draftDialog { width:min(680px,calc(100vw - 24px)); }
+  #newDraft, .draft-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .draft-item { border-top:1px solid #d8e0e7; padding:10px 0; }
+  .draft-details { margin:4px 0 8px; color:#536c7d; overflow-wrap:anywhere; }
+  .draft-stale { color:#893d1c; }
 </style>
 </head>
 <body>
-<div id="side">
+<div id="drawerBackdrop" hidden aria-hidden="true"></div>
+<div id="side" class="closed" inert>
   <h1>项目画布</h1>
   <div id="breadcrumb"></div>
   <button id="levelSettings">⚙ 当前层设置</button>
@@ -104,42 +232,39 @@
   <div id="members"></div>
   <div class="actions">
     <button id="pack" disabled>把勾选的模块打成组合…</button>
-    <button id="save">保存连接</button>
+    <button id="save">立即保存</button>
   </div>
 </div>
-<button id="drawerToggle" aria-controls="side" aria-expanded="true" title="收起模块列表">收起模块</button>
+<div id="canvasNavigation"><button id="drawerToggle" aria-controls="side" aria-expanded="false" title="展开模块列表">模块</button><button id="backLevel" hidden>← 返回上一级</button><button id="openDrafts">草稿</button><button id="showFormal" hidden>返回显示模式</button></div>
+<div id="saveStatus" role="status" aria-live="polite">显示模式 · 只读</div>
 <div id="stage">
   <div id="zoomControls" style="position:fixed;right:16px;bottom:12px;z-index:3;background:white"><button id="zoomOut" aria-label="缩小">−</button><span id="zoomValue">100%</span><button id="zoomIn" aria-label="放大">＋</button></div>
   <button id="composeSelection" hidden style="position:fixed;top:12px;left:50%;z-index:4">组成组合</button>
   <svg id="edges"></svg>
   <div id="board"></div>
-  <div id="panel"></div>
-  <div id="status"></div>
+  <div id="status" role="status" aria-live="polite" popover="manual"></div>
 </div>
 
-<div id="contextMenu" hidden><button id="addModule">添加通用节点</button><button data-add="input">添加输入节点</button><button data-add="output">添加输出节点</button></div>
-<dialog id="edgeDialog"><h3>设置连线</h3><form id="edgeForm"><label>传递什么<input name="info" required style="width:100%"></label><label>传递条件（可留空）<input name="when" style="width:100%"></label><label>连接类型<select name="kind"><option value="">普通</option><option value="support">辅助</option><option value="return">退回</option></select></label><div class="row"><button type="button" id="edgeCancel">取消</button><button class="primary" type="submit">确认连线</button></div></form></dialog>
-<dialog id="settingsDialog"><h3 id="settingsTitle">节点设置</h3><div id="settingsBody"></div><div class="row"><button id="settingsCancel">取消</button><button id="settingsSave" class="primary">保存设置</button></div></dialog>
-<dialog id="packDialog">
-  <h3>打包</h3>
-  <form id="packForm">
-    <label>新组合的标识（字母、数字、下划线）</label>
-    <input name="id" placeholder="例如 text_flow" required pattern="[A-Za-z0-9][A-Za-z0-9_-]*">
-    <label>显示名称</label>
-    <input name="name" placeholder="例如 文字处理组合" required>
-  </form>
-  <div id="packBody"></div>
-  <div class="row">
-    <button id="packCancel">取消</button>
-    <button id="packPreview">预览</button>
-    <button id="packConfirm" class="primary" disabled>确认打包</button>
-  </div>
+<dialog id="draftDialog" aria-labelledby="draftTitle">
+  <h3 id="draftTitle">画布草稿</h3>
+  <form id="newDraft"><button class="primary">新建草稿</button></form>
+  <p id="draftMessage" role="status"></p>
+  <div id="draftList"></div>
+  <div class="row"><button id="closeDrafts">关闭</button></div>
 </dialog>
+<dialog id="panel" aria-label="配套文件"></dialog>
+<div id="linkMenu" aria-label="选择连接节点" hidden></div>
+<div id="contextMenu" hidden><button id="addModule">添加通用节点</button><button data-add="input">添加输入节点</button><button data-add="output">添加输出节点</button></div>
+<dialog id="settingsDialog"><h3 id="settingsTitle">节点设置</h3><div id="settingsBody"></div><div class="row"><button id="settingsCancel">取消</button><button id="settingsSave" class="primary">保存设置</button></div></dialog>
 
 <script>
 const frameCache = new Map();
 const TOKEN = '__TOKEN__';
 const $ = (id) => document.getElementById(id);
+const draftId = new URLSearchParams(location.search).get('draft');
+const editable = Boolean(draftId);
+const browseViews = new Map();
+document.body.classList.toggle('display-mode', !editable);
 const state = { data: null, levelId: null, path: [], draft: [], stop: '', dirty: false, positions: {} };
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -149,7 +274,9 @@ async function api(path, body) {
   const options = body
     ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-canvas-token': TOKEN }, body: JSON.stringify(body) }
     : { headers: { 'x-canvas-token': TOKEN } };
-  const res = await fetch(path, options);
+  const url = new URL(path, location.origin);
+  if (draftId) url.searchParams.set('draft', draftId);
+  const res = await fetch(url, options);
   let data;
   try { data = await res.json(); } catch { throw Error('服务没有返回数据'); }
   if (!res.ok) throw Error(data.error || '请求失败');
@@ -157,12 +284,13 @@ async function api(path, body) {
 }
 
 let toastTimer = null;
-function toast(text, ms) {
+function toast(text, ms, warning = false) {
   const el = $('status');
   el.textContent = text;
-  el.style.display = 'block';
+  el.classList.toggle('warning',warning);
+  el.showPopover();
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.style.display = 'none'; }, ms || 2600);
+  toastTimer = setTimeout(() => el.hidePopover(), ms || 4500);
 }
 
 async function reload(levelId) {
@@ -179,11 +307,20 @@ async function reload(levelId) {
 function openLevel(id, resetPath) {
   const level = state.data.levels[id];
   if (!level) return;
+  if (!editable && state.levelId) browseViews.set(state.levelId,state.positions);
   state.levelId = id;
   state.draft = JSON.parse(JSON.stringify(level.links));
   state.stop = level.stop || '';
   state.dirty = false;
   state.positions = JSON.parse(JSON.stringify(state.data.layout[id] || {}));
+  if (!editable) {
+    const previous = browseViews.get(id);
+    if (previous?.$view) state.positions.$view = previous.$view;
+    for (const member of level.members) {
+      if (previous?.[member.id]?.expanded === undefined) continue;
+      state.positions[member.id] = {...state.positions[member.id],expanded:previous[member.id].expanded};
+    }
+  }
   if (resetPath) state.path = [];
   markDirty(false);
   renderSide();
@@ -191,12 +328,28 @@ function openLevel(id, resetPath) {
   render();
 }
 
+let autoSaveTimer = null, saving = null, editVersion = 0, saveFailed = false;
 function markDirty(value) {
+  if (!editable) return;
   state.dirty = value;
-  $('save').textContent = value ? '保存连接（有改动）' : '保存连接';
+  clearTimeout(autoSaveTimer);
+  if (value) {
+    editVersion++;
+    $('saveStatus').textContent = saveFailed ? '保存失败，草稿已保留；点击模块后重试保存' : '等待自动保存…';
+    if (!saveFailed) autoSaveTimer = setTimeout(() => save(), 600);
+  } else {
+    saveFailed = false;
+    $('saveStatus').textContent = '草稿已保存';
+  }
+}
+
+function parentLevelId() {
+  return Object.values(state.data.levels).find(level => level.members.some(member => member.id === state.levelId))?.id;
 }
 
 function renderSide() {
+  $('linkMenu').hidden = true;
+  $('backLevel').hidden = window.parent !== window || !parentLevelId();
   const level = state.data.levels[state.levelId];
   const trail = ['<a data-go="' + state.data.root.id + '">' + esc(state.data.root.name) + '</a>'];
   for (const step of state.path) trail.push('<a data-go="' + step.id + '">' + esc(step.name) + '</a>');
@@ -223,10 +376,104 @@ function updatePackButton() {
 
 // ---- 画布 -------------------------------------------------------------------
 
-function applyZoom() { const scale = state.positions.$view?.zoom || 1; $('board').style.zoom = scale; $('zoomValue').textContent = Math.round(scale*100) + '%'; }
-function changeZoom(delta) { const zoom = Math.min(1.5, Math.max(.4, (state.positions.$view?.zoom || 1) + delta)); state.positions.$view = {zoom}; applyZoom(); drawEdges(); markDirty(true); }
+function applyZoom() { const view = state.positions.$view || {}, scale = view.zoom || 1; $('board').style.zoom = scale; $('board').style.transform = `translate(${(view.panX || 0) / scale}px, ${(view.panY || 0) / scale}px)`; $('zoomValue').textContent = Math.round(scale*100) + '%'; }
+function changeZoom(delta, anchor) {
+  const stage = $('stage'), previous = state.positions.$view?.zoom || 1;
+  const zoom = Math.min(1.5, Math.max(.4, previous + delta));
+  if (zoom === previous) return;
+  const bounds = stage.getBoundingClientRect();
+  const x = anchor ? anchor.clientX - bounds.left : stage.clientWidth / 2;
+  const y = anchor ? anchor.clientY - bounds.top : stage.clientHeight / 2;
+  const view = state.positions.$view || {};
+  const left = (stage.scrollLeft + x - (view.panX || 0)) / previous, top = (stage.scrollTop + y - (view.panY || 0)) / previous;
+  state.positions.$view = { ...view, zoom, panX:stage.scrollLeft + x - left * zoom, panY:stage.scrollTop + y - top * zoom };
+  applyZoom();
+  drawEdges(); markDirty(true);
+}
 $('zoomIn').onclick = () => changeZoom(.1);
 $('zoomOut').onclick = () => changeZoom(-.1);
+// 中键直接平移视图，不受滚动边界限制，也不修改节点位置。
+const canvasTarget = target => !target.closest('#panel, #zoomControls, button, input, textarea, select, iframe');
+let selectionClickUntil = 0;
+$('stage').addEventListener('click', e => {
+  if (Date.now() < selectionClickUntil) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+$('stage').addEventListener('pointerdown', e => {
+  if (!editable || e.button !== 0 || e.target.closest('.node, .edge, button, input, textarea, select, iframe, #panel, #zoomControls')) return;
+  const stage = $('stage'), bounds = stage.getBoundingClientRect();
+  if (e.clientX >= bounds.left + stage.clientWidth || e.clientY >= bounds.top + stage.clientHeight) return;
+  const checks = [...document.querySelectorAll('[data-check]')];
+  const previous = new Set(checks.filter(c => c.checked).map(c => c.dataset.check));
+  const additive = e.ctrlKey || e.metaKey;
+  const box = document.createElement('div'); box.className = 'selection-box'; box.hidden = true; stage.append(box);
+  let dragged = false;
+  stage.setPointerCapture(e.pointerId);
+  const move = event => {
+    if (event.pointerId !== e.pointerId) return;
+    if (!dragged && Math.hypot(event.clientX-e.clientX,event.clientY-e.clientY) < 4) return;
+    dragged = true; event.preventDefault(); box.hidden = false;
+    const left = Math.max(bounds.left,Math.min(e.clientX,event.clientX)), top = Math.max(bounds.top,Math.min(e.clientY,event.clientY));
+    const right = Math.min(bounds.right,Math.max(e.clientX,event.clientX)), bottom = Math.min(bounds.bottom,Math.max(e.clientY,event.clientY));
+    Object.assign(box.style,{left:left+'px',top:top+'px',width:Math.max(0,right-left)+'px',height:Math.max(0,bottom-top)+'px'});
+    const hit = new Set([...$('board').children].filter(n => {
+      const r = n.getBoundingClientRect();
+      return r.left < right && r.right > left && r.top < bottom && r.bottom > top;
+    }).map(n=>n.dataset.id));
+    checks.forEach(c => { c.checked = hit.has(c.dataset.check) || (additive && previous.has(c.dataset.check)); });
+    updatePackButton();
+  };
+  const finish = (event, cancel = false) => {
+    if (event.pointerId !== undefined && event.pointerId !== e.pointerId) return;
+    if (cancel) { checks.forEach(c=>{c.checked=previous.has(c.dataset.check);}); updatePackButton(); }
+    if (dragged) selectionClickUntil = Date.now()+250;
+    box.remove();
+    stage.removeEventListener('pointermove',move); stage.removeEventListener('pointerup',up);
+    stage.removeEventListener('pointercancel',abort); stage.removeEventListener('lostpointercapture',abort);
+    document.removeEventListener('keydown',key);
+    if(stage.hasPointerCapture(e.pointerId))stage.releasePointerCapture(e.pointerId);
+  };
+  const up = event => finish(event);
+  const abort = event => finish(event,true);
+  const key = event => { if(event.key==='Escape'){event.preventDefault();finish(event,true);} };
+  stage.addEventListener('pointermove',move); stage.addEventListener('pointerup',up);
+  stage.addEventListener('pointercancel',abort); stage.addEventListener('lostpointercapture',abort);
+  document.addEventListener('keydown',key);
+});
+$('stage').addEventListener('pointerdown', e => {
+  if (e.button !== 1 || !canvasTarget(e.target)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const stage = $('stage');
+  const origin = { x:e.clientX, y:e.clientY, left:state.positions.$view?.panX || 0, top:state.positions.$view?.panY || 0 };
+  stage.setPointerCapture(e.pointerId);
+  stage.classList.add('panning');
+  const move = event => {
+    if (event.pointerId !== e.pointerId) return;
+    state.positions.$view = { ...state.positions.$view, panX:origin.left + event.clientX - origin.x, panY:origin.top + event.clientY - origin.y };
+    applyZoom(); drawEdges(); markDirty(true);
+  };
+  const end = event => {
+    if (event.pointerId !== e.pointerId) return;
+    stage.classList.remove('panning');
+    stage.removeEventListener('pointermove', move);
+    stage.removeEventListener('pointerup', end);
+    stage.removeEventListener('pointercancel', end);
+    stage.removeEventListener('lostpointercapture', end);
+    if (stage.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+  };
+  stage.addEventListener('pointermove', move);
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+  stage.addEventListener('lostpointercapture', end);
+}, true);
+$('stage').addEventListener('auxclick', e => {
+  if (e.button === 1 && canvasTarget(e.target)) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+$('stage').addEventListener('wheel', e => {
+  if (!e.ctrlKey || !canvasTarget(e.target)) return;
+  e.preventDefault();
+  if (e.deltaY) changeZoom(e.deltaY < 0 ? .1 : -.1, e);
+}, { passive:false });
 function nodesOf(level) {
   const list = [];
   for (const type of ['input', 'output']) {
@@ -280,6 +527,17 @@ function render() {
       updatePackButton();
     });
     if (node.isCombo) {
+      const applySize = () => {
+        const saved=state.positions[node.id] || {};
+        el.style.width=el.classList.contains('expanded') && saved.width ? saved.width+'px' : '';
+        el.style.height=el.classList.contains('expanded') && saved.height ? saved.height+'px' : '';
+      };
+      for (const direction of ['n','s','e','w','ne','nw','se','sw']) {
+        const handle=document.createElement('div');handle.className='resize-handle '+direction;handle.dataset.resize=direction;
+        handle.addEventListener('pointerdown',event=>startResize(event,el,node.id,direction));
+        handle.addEventListener('click',event=>event.stopPropagation());
+        el.append(handle);
+      }
       const cached = frameCache.get(node.id);
       if (cached) { el.append(cached); el.classList.toggle('expanded', !cached.hidden); el.querySelector('[data-expand]').textContent = cached.hidden ? '展开内部' : '收起内部'; }
       el.querySelector('[data-enter]').onclick = () => enterCombo(node.id);
@@ -288,27 +546,29 @@ function render() {
         if (frame) {
           frame.hidden = !frame.hidden;
           el.classList.toggle('expanded', !frame.hidden);
-          state.positions[node.id] = { x:el.offsetLeft,y:el.offsetTop,expanded:!frame.hidden }; markDirty(true);
+          state.positions[node.id] = { ...state.positions[node.id],x:el.offsetLeft,y:el.offsetTop,expanded:!frame.hidden }; markDirty(true);
           e.target.textContent = frame.hidden ? '展开内部' : '收起内部';
-          drawEdges(); return;
+          applySize(); drawEdges(); return;
 
         } else {
           const frame = document.createElement('iframe');
           frame.dataset.combo = node.id;
           frame.className = 'inline-canvas'; frame.title = node.name + '内部结构';
-          frame.src = '/?scope=' + encodeURIComponent(node.id);
+          frame.src = '/?' + new URLSearchParams({scope:node.id,...(draftId ? {draft:draftId} : {})});
           el.append(frame); el.classList.add('expanded'); e.target.textContent = '收起内部';
-          state.positions[node.id] = { x:el.offsetLeft,y:el.offsetTop,expanded:true }; markDirty(true);
+          state.positions[node.id] = { ...state.positions[node.id],x:el.offsetLeft,y:el.offsetTop,expanded:true }; markDirty(true);
         }
-        drawEdges();
+        applySize(); drawEdges();
       };
+      applySize();
     }
     if (node.isCombo && state.positions[node.id]?.expanded && !el.querySelector('iframe')) { const wasDirty = state.dirty; el.querySelector('[data-expand]').click(); markDirty(wasDirty); }
     const head = el.querySelector('.head');
     head.addEventListener('mousedown', (e) => startDrag(e, el, node.id));
-    head.addEventListener('dblclick', () => node.type ? settings(node) : node.isCombo ? enterCombo(node.id) : showDocs(node.id));
+    head.addEventListener('dblclick', () => node.type ? (editable && settings(node)) : node.isCombo ? enterCombo(node.id) : showDocs(node.id));
     el.querySelectorAll('[data-dot]').forEach(dot => {
       const row = dot.closest('.port');
+      if (!editable) return;
       row.style.cursor = 'crosshair';
       row.addEventListener('mousedown', e => startLink(e, dot));
       row.addEventListener('click', e => {
@@ -320,7 +580,7 @@ function render() {
         } else if (pendingOutput) {
           const from = pendingOutput; pendingOutput = null;
           document.querySelectorAll('.port.connecting').forEach(p => p.classList.remove('connecting'));
-          editEdge(state.draft.length, { from, to:{module:dot.dataset.id,port:dot.dataset.port},info:'' }, true);
+          connectPorts(from, {module:dot.dataset.id,port:dot.dataset.port});
         }
       });
       if (node.isCombo) dot.addEventListener('click', () => {
@@ -336,47 +596,172 @@ function render() {
   drawEdges();
 }
 
+function roundedRoute(path, radius=22) {
+  if(/[CQSLTAZ]/i.test(path))return path;
+  const tokens=path.match(/[MHV]|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)||[];
+  const points=[];let x=0,y=0;
+  for(let i=0;i<tokens.length;){const command=tokens[i++];if(command==='M'){x=Number(tokens[i++]);y=Number(tokens[i++]);}else if(command==='H')x=Number(tokens[i++]);else if(command==='V')y=Number(tokens[i++]);else return path;
+    if(!points.length||points.at(-1).x!==x||points.at(-1).y!==y)points.push({x,y});
+  }
+  if(points.length<2)return path;
+  let result=`M ${points[0].x} ${points[0].y}`;
+  for(let i=1;i<points.length-1;i++){
+    const a=points[i-1],b=points[i],c=points[i+1],ab=Math.hypot(b.x-a.x,b.y-a.y),bc=Math.hypot(c.x-b.x,c.y-b.y),r=Math.min(radius,ab/2,bc/2);
+    if((b.x-a.x)*(c.y-b.y)===(b.y-a.y)*(c.x-b.x)){result+=` L ${b.x} ${b.y}`;continue;}
+    const start={x:b.x-(b.x-a.x)/ab*r,y:b.y-(b.y-a.y)/ab*r},end={x:b.x+(c.x-b.x)/bc*r,y:b.y+(c.y-b.y)/bc*r};
+    result+=` L ${start.x} ${start.y} Q ${b.x} ${b.y} ${end.x} ${end.y}`;
+  }
+  return result+` L ${points.at(-1).x} ${points.at(-1).y}`;
+}
+
+// Route every combination through the same measured port/obstacle rules.
+// Endpoints are never moved; separate lanes are display geometry only.
+function connectionRoute(a,b,{boxes=[],source,target,index=0,used=[],returning=false}={}) {
+ const pad=22, lane=28+(index%7)*12;
+ const s=boxes.find(r=>r.id===source),t=boxes.find(r=>r.id===target);
+ const right=s?Math.max(a.x+18,s.x+s.width+18):a.x+18;
+ const left=t?Math.min(b.x-18,t.x-18):b.x-18;
+ const blocked=(p,q)=>boxes.some(r=>{
+  // Dots sit inside card padding: allow only the short endpoint lead through its own card.
+  if(r.id===source&&p.x===a.x&&p.y===a.y)return false;
+  if(r.id===target&&q.x===b.x&&q.y===b.y)return false;
+  if(p.y===q.y)return p.y>r.y-8&&p.y<r.y+r.height+8&&Math.max(p.x,q.x)>r.x-8&&Math.min(p.x,q.x)<r.x+r.width+8;
+  return p.x>r.x-8&&p.x<r.x+r.width+8&&Math.max(p.y,q.y)>r.y-8&&Math.min(p.y,q.y)<r.y+r.height+8;
+ });
+ const candidates=[];
+ const add=points=>{
+  points=points.filter((p,i)=>!i||p.x!==points[i-1].x||p.y!==points[i-1].y);
+  if(points.some((p,i)=>i&&blocked(points[i-1],p)))return;
+  let score=points.length*14;
+  for(let i=1;i<points.length;i++){
+   const p=points[i-1],q=points[i];score+=Math.abs(p.x-q.x)+Math.abs(p.y-q.y);
+   for(const old of used)for(let j=1;j<old.length;j++){
+    const u=old[j-1],v=old[j];
+    const horizontal=p.y===q.y&&u.y===v.y&&Math.abs(p.y-u.y)<10;
+    const vertical=p.x===q.x&&u.x===v.x&&Math.abs(p.x-u.x)<10;
+    const sharedStart=old[0].x===a.x&&old[0].y===a.y;
+    if(!sharedStart&&horizontal&&Math.min(Math.max(p.x,q.x),Math.max(u.x,v.x))-Math.max(Math.min(p.x,q.x),Math.min(u.x,v.x))>24)score+=350;
+    if(!sharedStart&&vertical&&Math.min(Math.max(p.y,q.y),Math.max(u.y,v.y))-Math.max(Math.min(p.y,q.y),Math.min(u.y,v.y))>24)score+=350;
+   }
+  }
+  candidates.push({points,score});
+ };
+ const feedback=(returning||b.x<=a.x)&&(s&&t?t.y<=s.y+1:b.y<=a.y);
+ if(!feedback&&left>=right){
+  for(const ratio of [.5,.25,.75,.15,.85]){const x=right+(left-right)*ratio;add([a,{x:right,y:a.y},{x,y:a.y},{x,y:b.y},{x:left,y:b.y},b]);}
+ }
+ const bottom=Math.max(s?s.y+s.height:a.y,t?t.y+t.height:b.y)+55+lane;
+ const levels=feedback?[bottom]:[Math.max(a.y,b.y)+lane,Math.min(a.y,b.y)-lane];
+ for(const r of boxes){if(!feedback||r.y+r.height+pad+lane>=bottom)levels.push(r.y+r.height+pad+lane);if(!feedback)levels.push(Math.max(20,r.y-pad-lane));}
+ for(const y of [...new Set(levels)])for(const offset of [0,16,32]){
+  const x1=right+offset,x2=left-offset;
+  add([a,{x:x1,y:a.y},{x:x1,y},{x:x2,y},{x:x2,y:b.y},b]);
+ }
+ candidates.sort((x,y)=>x.score-y.score);
+ let points=candidates[0]?.points;
+ if(!points){
+  // Keep endpoints visible even for overlapping user-positioned cards; flag the unresolved route.
+  const y=Math.max(bottom,...boxes.map(r=>r.y+r.height))+lane;
+  points=[a,{x:right,y:a.y},{x:right,y},{x:left,y},{x:left,y:b.y},b];
+ }
+ const unresolved=!candidates.length;
+ used.push(points);
+ let longest=0,label={x:a.x+20,y:a.y-14};
+ for(let i=1;i<points.length;i++){const p=points[i-1],q=points[i],len=Math.abs(q.x-p.x);if(p.y===q.y&&len>longest){longest=len;label={x:(p.x+q.x)/2,y:p.y-12};}}
+ // roundedRoute accepts the orthogonal M/H/V form.
+ let path=`M ${a.x} ${a.y}`;for(let i=1;i<points.length;i++)path+=points[i].y===points[i-1].y?` H ${points[i].x}`:` V ${points[i].y}`;
+ return {path:roundedRoute(path),label,feedback,points,unresolved,bottom:Math.max(...points.map(p=>p.y))+40};
+}
+
 function drawEdges() {
   const svg = $('edges');
-  svg.innerHTML = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker></defs>';
+  svg.innerHTML = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#426b78"/></marker></defs>';
   const bounds = $('stage').getBoundingClientRect();
   const stage = $('stage');
   svg.style.width = stage.scrollWidth + 'px'; svg.style.height = stage.scrollHeight + 'px';
+  const boxes = [...$('board').children].filter(el => el.classList.contains('node')).map(el => {
+    const r = el.getBoundingClientRect();
+    return {id:el.dataset.id, x:r.left-bounds.left+stage.scrollLeft, y:r.top-bounds.top+stage.scrollTop, width:r.width, height:r.height};
+  });
+  const used = [];
   state.draft.forEach((edge, index) => {
     const from = document.querySelector('[data-dot="out"][data-id="' + sel(edge.from.module) + '"][data-port="' + sel(edge.from.port) + '"]');
     const to = document.querySelector('[data-dot="in"][data-id="' + sel(edge.to.module) + '"][data-port="' + sel(edge.to.port) + '"]');
     if (!from || !to) return;
     const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
     const x1 = a.left + a.width / 2 - bounds.left + stage.scrollLeft, y1 = a.top + a.height / 2 - bounds.top + stage.scrollTop, x2 = b.left + b.width / 2 - bounds.left + stage.scrollLeft, y2 = b.top + b.height / 2 - bounds.top + stage.scrollTop;
-    const mx = Math.max((x1 + x2) / 2, x1 + 40);
+    const route = connectionRoute({x:x1,y:y1}, {x:x2,y:y2}, {boxes,source:from.closest('.node').dataset.id,target:to.closest('.node').dataset.id,index,used});
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('class', 'line');
-    path.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
+    path.setAttribute('d', route.path);
     const group = document.createElementNS(svg.namespaceURI, 'g');
-    group.setAttribute('class', 'edge ' + (edge.kind || 'main'));
+    group.setAttribute('class', 'edge');
     path.setAttribute('marker-end', 'url(#arrow)');
     const hit = path.cloneNode(); hit.setAttribute('class', 'hit'); hit.removeAttribute('marker-end');
     group.append(path, hit); svg.append(group);
-    group.addEventListener('click', () => editEdge(index));
-    group.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); removeEdge(index); });
+    group.addEventListener('dblclick', e => { e.preventDefault(); e.stopPropagation(); removeEdge(index); });
 
+    const title = document.createElementNS(svg.namespaceURI, 'title');
+    title.textContent = edge.info + (edge.when ? '；' + edge.when : '');
+    group.append(title);
     if (edge.info) {
-      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      label.setAttribute('x', (x1 + x2) / 2 - 40);
-      label.setAttribute('y', (y1 + y2) / 2 - 8);
-      label.textContent = edge.info.length > 18 ? edge.info.slice(0, 18) + '…' : edge.info;
-      group.appendChild(label);
+      const label = document.createElementNS(svg.namespaceURI, 'g');
+      label.setAttribute('class', 'edge-label');
+      const chunks = edge.info.match(/.{1,16}/gu) || [''];
+      const width = Math.max(...chunks.map(c => c.length)) * 14 + 16;
+      label.setAttribute('transform', `translate(${route.label.x-width/2},${route.label.y-chunks.length*18})`);
+      const rect = document.createElementNS(svg.namespaceURI, 'rect');
+      for (const [key,value] of Object.entries({x:-5,y:-14,width,height:chunks.length*18+8,rx:5})) rect.setAttribute(key,value);
+      label.append(rect);
+      chunks.forEach((line,i) => {
+        const text = document.createElementNS(svg.namespaceURI, 'text');
+        text.setAttribute('x',0); text.setAttribute('y',i*18); text.textContent=line;
+        label.append(text);
+      });
+      group.append(label);
     }
   });
 }
 
+function startResize(event, el, id, direction) {
+  if (!editable) return;
+  if(event.button!==0 || !el.classList.contains('expanded')) return;
+  event.preventDefault(); event.stopPropagation();
+  const handle=event.currentTarget, scale=state.positions.$view?.zoom || 1;
+  const origin={x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight,cx:event.clientX,cy:event.clientY};
+  const minWidth=340, frame=el.querySelector('iframe');
+  const minHeight=Math.max(260,origin.height-(frame?.offsetHeight || 0)+120);
+  handle.setPointerCapture(event.pointerId); el.classList.add('resizing');
+  const move=e=>{
+    if(e.pointerId!==event.pointerId)return;
+    const dx=(e.clientX-origin.cx)/scale,dy=(e.clientY-origin.cy)/scale;
+    let {x,y,width,height}=origin;
+    if(direction.includes('e'))width=Math.max(minWidth,origin.width+dx);
+    if(direction.includes('s'))height=Math.max(minHeight,origin.height+dy);
+    if(direction.includes('w')){x=Math.min(origin.x+origin.width-minWidth,origin.x+dx);width=origin.width+origin.x-x;}
+    if(direction.includes('n')){y=Math.min(origin.y+origin.height-minHeight,origin.y+dy);height=origin.height+origin.y-y;}
+    Object.assign(el.style,{left:x+'px',top:y+'px',width:width+'px',height:height+'px'});
+    drawEdges();
+  };
+  const end=e=>{
+    if(e.pointerId!==event.pointerId)return;
+    handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);handle.removeEventListener('lostpointercapture',end);
+    el.classList.remove('resizing');
+    if(handle.hasPointerCapture(event.pointerId))handle.releasePointerCapture(event.pointerId);
+    state.positions[id]={...state.positions[id],x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight};
+    markDirty(true);drawEdges();
+  };
+  handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);handle.addEventListener('lostpointercapture',end);
+}
+
 function startDrag(event, el, id) {
+  if (!editable) return;
   if (event.button !== 0 || event.target.closest('button')) return;
   event.preventDefault();
   const origin = { x: event.clientX, y: event.clientY, left: el.offsetLeft, top: el.offsetTop };
   const move = (e) => {
-    el.style.left = Math.max(0, origin.left + (e.clientX - origin.x) / (state.positions.$view?.zoom || 1)) + 'px';
-    el.style.top = Math.max(0, origin.top + (e.clientY - origin.y) / (state.positions.$view?.zoom || 1)) + 'px';
+    el.style.left = (origin.left + (e.clientX - origin.x) / (state.positions.$view?.zoom || 1)) + 'px';
+    el.style.top = (origin.top + (e.clientY - origin.y) / (state.positions.$view?.zoom || 1)) + 'px';
     drawEdges();
   };
   const up = () => {
@@ -393,7 +778,7 @@ function startDrag(event, el, id) {
 
 let linking = null, pendingOutput = null;
 function startLink(event, dot) {
-  if (event.button !== 0 || dot.dataset.dot !== 'out') return;
+  if (event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
   const r = dot.getBoundingClientRect();
@@ -404,7 +789,7 @@ function startLink(event, dot) {
   path.setAttribute('stroke-width', '2');
   path.setAttribute('stroke-dasharray', '4 3');
   $('edges').appendChild(path);
-  linking = { from: { module: dot.dataset.id, port: dot.dataset.port }, path, x: r.left + r.width / 2 - $('stage').getBoundingClientRect().left + $('stage').scrollLeft, y: r.top + r.height / 2 - $('stage').getBoundingClientRect().top + $('stage').scrollTop };
+  linking = { direction:dot.dataset.dot, startX:event.clientX, startY:event.clientY, from: { module: dot.dataset.id, port: dot.dataset.port }, path, x: r.left + r.width / 2 - $('stage').getBoundingClientRect().left + $('stage').scrollLeft, y: r.top + r.height / 2 - $('stage').getBoundingClientRect().top + $('stage').scrollTop };
 }
 document.addEventListener('mousemove', (e) => {
   if (!linking) return;
@@ -413,48 +798,93 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('mouseup', (e) => {
   if (!linking) return;
   linking.path.remove();
-  const from = linking.from;
+  const {from, direction, startX, startY} = linking;
   linking = null;
-  const row = e.target.closest ? e.target.closest('.port') : null;
-  const dot = row?.querySelector('[data-dot="in"]');
-  if (!dot) return;
+  const opposite = direction === 'out' ? 'in' : 'out';
+  const row = e.target.closest?.('.port');
+  const dot = row?.querySelector('[data-dot="' + opposite + '"]');
+  const dragged = Math.hypot(e.clientX-startX,e.clientY-startY) >= 4;
+  if (!dot && (!dragged || !$('stage').contains(e.target) || e.target.closest?.('.node, .edge, button, iframe'))) return;
   pendingOutput = null;
   document.querySelectorAll('.port.connecting').forEach(p => p.classList.remove('connecting'));
-  editEdge(state.draft.length, { from, to: { module: dot.dataset.id, port: dot.dataset.port }, info: '' }, true);
+  const connect = target => {
+    const endpoint = {module:target.dataset.id,port:target.dataset.port};
+    if (direction === 'out') connectPorts(from,endpoint);
+    else connectPorts(endpoint,from);
+  };
+  if (dot) connect(dot);
+  else showLinkMenu(e,from,direction);
 });
 
-let editingEdge = null;
-function editEdge(index, preset, isNew) {
-  const edge = preset || state.draft[index];
-  if (!edge) return;
-  editingEdge = { index, edge, isNew };
-  const form = $('edgeForm');
-  form.elements.info.value = edge.info || '';
-  form.elements.when.value = edge.when || '';
-  form.elements.kind.value = edge.kind || '';
-  $('edgeDialog').showModal();
+function showLinkMenu(event, endpoint, direction) {
+  if (direction === 'in' && inputOccupied(endpoint)) return;
+  const menu = $('linkMenu');
+  const heading = document.createElement('strong');
+  heading.textContent = '新建并连接节点';
+  menu.replaceChildren(heading);
+  const stage = $('stage'), bounds = stage.getBoundingClientRect(), view = state.positions.$view || {};
+  const scale = view.zoom || 1;
+  const position = {
+    x:(event.clientX-bounds.left+stage.scrollLeft-(view.panX || 0))/scale,
+    y:(event.clientY-bounds.top+stage.scrollTop-(view.panY || 0))/scale,
+  };
+  const connect = { endpoint, direction };
+  const input = direction === 'in';
+  const io = {
+    id:'io_' + crypto.randomUUID().replaceAll('-',''),
+    type:input ? 'input' : 'output',
+    name:input ? '输入' : '输出',
+    description:input ? '待处理的材料' : '处理后的结果',
+  };
+  for (const [label, body] of [
+    ['新建通用节点',{action:'createModule',position,connect}],
+    [input ? '新建输入节点' : '新建输出节点',{action:'io',node:io,position,connect}],
+  ]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.onclick = () => { menu.hidden = true; structural(body); };
+    menu.append(button);
+  }
+  menu.hidden = false;
+  menu.style.left = Math.max(8,Math.min(event.clientX,innerWidth-menu.offsetWidth-8))+'px';
+  menu.style.top = Math.max(8,Math.min(event.clientY,innerHeight-menu.offsetHeight-8))+'px';
+  menu.querySelector('button')?.focus();
 }
-$('edgeCancel').onclick = () => { editingEdge = null; $('edgeDialog').close(); };
-$('edgeForm').onsubmit = e => {
-  e.preventDefault();
-  if (!editingEdge) return;
-  const form = $('edgeForm'), info = form.elements.info.value.trim();
-  if (!info) { form.elements.info.focus(); return; }
-  const { index, edge, isNew } = editingEdge;
-  const next = { from:edge.from, to:edge.to, info };
-  if (form.elements.when.value.trim()) next.when = form.elements.when.value.trim();
-  if (form.elements.kind.value) next.kind = form.elements.kind.value;
-  if (isNew) {
-    const duplicate = state.draft.findIndex(e => JSON.stringify(e.from) === JSON.stringify(next.from) && JSON.stringify(e.to) === JSON.stringify(next.to));
-    if (duplicate >= 0) state.draft[duplicate] = next; else state.draft.push(next);
-  } else state.draft[index] = next;
-  editingEdge = null; $('edgeDialog').close(); markDirty(true); drawEdges();
-};
+document.addEventListener('pointerdown', e => {
+  if (!$('linkMenu').contains(e.target)) $('linkMenu').hidden = true;
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') $('linkMenu').hidden = true;
+});
+
+function inputOccupied(endpoint) {
+  if (!state.draft.some(edge => edge.to.module === endpoint.module && edge.to.port === endpoint.port)) return false;
+  const port = [...$('board').querySelectorAll('[data-dot="in"]')].find(dot => dot.dataset.id === endpoint.module && dot.dataset.port === endpoint.port);
+  const row = port?.closest('.port');
+  if (row) {
+    row.classList.add('port-blocked');
+    clearTimeout(row.blockedTimer);
+    row.blockedTimer = setTimeout(() => row.classList.remove('port-blocked'),4500);
+  }
+  toast('这个输入端口已有来源，请双击删除旧连线后再连接', 5500, true);
+  return true;
+}
+
+function connectPorts(from, to) {
+  const duplicate = state.draft.some(edge => edge.from.module === from.module && edge.from.port === from.port && edge.to.module === to.module && edge.to.port === to.port);
+  if (duplicate || inputOccupied(to)) return;
+  const source = document.querySelector('[data-dot="out"][data-id="' + sel(from.module) + '"][data-port="' + sel(from.port) + '"]');
+  const info = source?.getAttribute('title')?.trim() || from.port;
+  state.draft.push({from, to, info});
+  markDirty(true);
+  drawEdges();
+}
 
 function removeEdge(index) {
+  if (!editable) return;
   const edge = state.draft[index];
   if (!edge) return;
-  if (!confirm('删掉这条线？\n' + edge.from.module + '.' + edge.from.port + ' → ' + edge.to.module + '.' + edge.to.port)) return;
   state.draft.splice(index, 1);
   markDirty(true);
   drawEdges();
@@ -462,82 +892,154 @@ function removeEdge(index) {
 
 // ---- 组合与文件 -------------------------------------------------------------
 
-function enterCombo(id) {
+async function enterCombo(id) {
   const level = state.data.levels[state.levelId];
   const member = level.members.find(m => m.id === id);
   if (!member) return;
-  if (window.canvasHasChanges() && !confirm('当前层有没保存的改动，进入组合后这些改动会丢失。继续？')) return;
+  if (!await flushCanvas()) return;
   state.path.push({ id, name: member.name });
   openLevel(id, false);
 }
 
-function goTo(id) {
-  if (window.canvasHasChanges() && !confirm('有未保存的改动，放弃并切换？')) return;
+async function goTo(id) {
+  if (!await flushCanvas()) return;
   const index = state.path.findIndex(step => step.id === id);
   state.path = index < 0 ? [] : state.path.slice(0, index);
   openLevel(id, false);
 }
 
+let docReadSequence = 0;
 async function showDocs(id) {
   const info = state.data.docs[id === '$self' ? state.levelId : id];
   if (!info) return;
   const panel = $('panel');
-  panel.classList.add('show');
-  panel.innerHTML = '<button id="closeDocs" style="float:right">关闭</button><h2>' + esc(info.name) + '</h2><div class="path">' + esc(info.label) + '</div>' +
-    '<div class="tabs">' + info.files.map(f => '<button data-file="' + esc(f) + '">' + esc(f) + '</button>').join('') + '</div><pre></pre>';
-  const pre = panel.querySelector('pre');
-  panel.querySelectorAll('[data-file]').forEach(btn => btn.addEventListener('click', async () => {
-    panel.querySelectorAll('[data-file]').forEach(b => b.classList.toggle('on', b === btn));
-    pre.textContent = '读取中…';
-    try {
-      const doc = await api('/api/doc?id=' + encodeURIComponent(id) + '&file=' + encodeURIComponent(btn.dataset.file));
-      pre.textContent = doc.content;
-    } catch (e) { pre.textContent = e.message; }
-  }));
-  const first = panel.querySelector('[data-file]');
-  if (first) first.click(); else pre.textContent = '这个模块还没有说明书。';
+  docReadSequence++;
+  panel.innerHTML = '<div class="file-heading"><h2>' + esc(info.name) + ' · 配套文件</h2><button id="closeDocs">关闭</button></div>' +
+    '<p class="file-inventory">共 ' + info.files.length + ' 个文件</p><div class="file-layout"><nav id="fileCatalog" aria-label="配套文件分类"></nav><div class="file-content"><div class="body-layout"><nav id="bodyTree" aria-label="本体文件树"></nav><div class="file-viewer"><div class="path"></div><pre tabindex="0" aria-label="文件内容"></pre></div></div></div></div>';
+  const catalog = $('fileCatalog'), pre = panel.querySelector('pre'), path = panel.querySelector('.path');
+  const labels = {'README.md':'模块说明书', 'module.json':'模块登记表', 'VALIDATION.md':'检查标准'};
+  const root = {folders:new Map(), files:[]};
+  const bodyTree = $('bodyTree');
+  const bodyFiles = info.files.filter(file => !['README.md','module.json','VALIDATION.md'].includes(file) || file === info.implementation);
+  for (const file of bodyFiles) {
+    const parts = file.split('/'); let branch = root;
+    for (const part of parts.slice(0,-1)) {
+      if (!branch.folders.has(part)) branch.folders.set(part,{folders:new Map(),files:[]});
+      branch = branch.folders.get(part);
+    }
+    branch.files.push(file);
+  }
+  const renderTree = (branch, parent, prefix = '') => {
+    for (const [name, child] of [...branch.folders].sort(([a],[b]) => a.localeCompare(b))) {
+      const folder = document.createElement('details'); folder.className = 'file-folder';
+      const folderPath = prefix + name + '/';
+      folder.open = Boolean(info.implementation?.startsWith(folderPath));
+      const summary = document.createElement('summary'); summary.textContent = name; folder.append(summary);
+      const children = document.createElement('div'); children.className = 'file-children'; folder.append(children);
+      renderTree(child,children,folderPath); parent.append(folder);
+    }
+    for (const file of [...branch.files].sort((a,b) => a.localeCompare(b))) {
+      const button = document.createElement('button'); button.type = 'button'; button.dataset.file = file;
+      button.setAttribute('aria-pressed','false'); button.title = file;
+      const name = document.createElement('span'); name.textContent = file.split('/').pop(); button.append(name);
+      if (file === info.implementation) { const badge = document.createElement('span'); badge.className = 'body-badge'; badge.textContent = '本体入口'; button.append(badge); }
+      if (labels[file]) { const hint = document.createElement('small'); hint.textContent = labels[file]; button.append(hint); }
+      button.onclick = async () => {
+        const sequence = ++docReadSequence;
+        bodyTree.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed',String(b === button)));
+        path.textContent = info.label + '/' + file; pre.textContent = '读取中…';
+        try {
+          const doc = await api('/api/doc?id=' + encodeURIComponent(id) + '&file=' + encodeURIComponent(file));
+          if (sequence === docReadSequence) { path.textContent = doc.path; pre.textContent = doc.content; }
+        } catch (e) { if (sequence === docReadSequence) pre.textContent = '读取失败：' + e.message; }
+      };
+      parent.append(button);
+    }
+  };
+  const rootLabel = document.createElement('div'); rootLabel.className = 'file-root'; rootLabel.textContent = '本体文件';
+  bodyTree.append(rootLabel);
+  renderTree(root,bodyTree);
+  if (!info.implementation || !info.files.includes(info.implementation)) {
+    const note = document.createElement('p'); note.className = 'file-missing';
+    note.textContent = info.implementation ? '本体入口不存在或无法读取：' + info.implementation : '尚未登记本体入口。';
+    bodyTree.append(note);
+  }
+  const sections = [{name:'本体',file:null}, ...['README.md','module.json','VALIDATION.md'].filter(file=>info.files.includes(file)).map(file=>({name:labels[file],file}))];
+  for (const section of sections) {
+    const button = document.createElement('button'); button.type='button'; button.textContent=section.name; button.setAttribute('aria-pressed','false');
+    button.onclick = async () => {
+      ++docReadSequence;
+      catalog.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+      bodyTree.hidden=Boolean(section.file);
+      panel.querySelector('.body-layout').classList.toggle('single-file',Boolean(section.file));
+      if (!section.file) {
+        const first=[...bodyTree.querySelectorAll('button')].find(b=>b.dataset.file===info.implementation)||bodyTree.querySelector('button');
+        if(first) first.click(); else { path.textContent=''; pre.textContent='尚未添加本体文件。'; }
+        return;
+      }
+      const sequence=docReadSequence; path.textContent=info.label+'/'+section.file; pre.textContent='读取中…';
+      try { const doc=await api('/api/doc?id='+encodeURIComponent(id)+'&file='+encodeURIComponent(section.file)); if(sequence===docReadSequence){path.textContent=doc.path;pre.textContent=doc.content;} }
+      catch(e){if(sequence===docReadSequence)pre.textContent='读取失败：'+e.message;}
+    };
+    catalog.append(button);
+  }
+  if (!panel.open) panel.showModal();
+  catalog.querySelector('button')?.click();
 }
 
 // ---- 保存与打包 -------------------------------------------------------------
 
 async function save() {
-  try {
-    state.data = await api('/api/save', {
-      levelId: state.levelId, links: state.draft, stop: state.stop,
-      positions: state.positions, revision: state.data.revisions[state.levelId], fileRevisions: state.data.fileRevisions,
-    });
-    openLevel(state.levelId, false);
-    toast('已保存');
-  } catch (e) { toast('保存失败：' + e.message, 8000); }
+  if (!editable) return true;
+  clearTimeout(autoSaveTimer);
+  if (saving) {
+    if (!await saving) return false;
+    return state.dirty ? save() : true;
+  }
+  if (!state.dirty) return true;
+  const levelId = state.levelId, version = editVersion;
+  const payload = structuredClone({levelId, links:state.draft, stop:state.stop, positions:state.positions,
+    revision:state.data.revisions[levelId], fileRevisions:state.data.fileRevisions});
+  $('saveStatus').textContent = '正在自动保存…';
+  saving = (async () => {
+    try {
+      const next = await api('/api/save', payload);
+      state.data = next;
+      saveFailed = false;
+      // 保存期间的新改动留在原画布中，不用旧响应重绘覆盖。
+      if (version === editVersion) markDirty(false);
+      else $('saveStatus').textContent = '等待自动保存…';
+      return true;
+    } catch (e) {
+      saveFailed = true;
+      $('saveStatus').textContent = '保存失败，草稿已保留；点击模块后重试保存';
+      toast('自动保存失败：' + e.message, 10000);
+      return false;
+    }
+  })();
+  const ok = await saving;
+  saving = null;
+  if (ok && state.dirty) return save();
+  return ok;
 }
+async function flushCanvas() {
+  for (const frame of new Set([...frameCache.values(), ...document.querySelectorAll('iframe')])) {
+    if (frame.contentWindow?.canvasHasChanges?.() && !await frame.contentWindow.canvasSave()) return false;
+  }
+  // 子画布也写项目文件；无本层草稿时刷新版本，再进入下一项操作。
+  if (!state.dirty && !saving) state.data = await api('/api/project');
+  return save();
+}
+window.canvasSave = flushCanvas;
 
 function selected() {
   return [...document.querySelectorAll('[data-check]:checked')].map(c => c.dataset.check);
 }
 
-async function previewPack() {
-  const form = $('packForm');
-  const id = form.id.value.trim();
-  const name = form.name.value.trim();
-  if (!id || !name) { toast('先填标识和名称'); return null; }
-  try {
-    const preview = await api('/api/pack-preview', { parentId: state.levelId, memberIds: selected(), id, name, fileRevisions:state.data.fileRevisions });
-    $('packBody').innerHTML =
-      '<p>新组合 <b>' + esc(preview.combo) + '</b>，放在 <code>' + esc(preview.location) + '</code></p>' +
-      '<p>会移动这些目录：</p><ul>' + [...preview.move, ...(preview.ioNodes || []).map(n => ({name:n.name,from:'本层独立节点',to:'组合内部'}))].map(m => '<li>' + esc(m.name) + '：' + esc(m.from) + ' → ' + esc(m.to) + '</li>').join('') + '</ul>' +
-      '<p>对新组合开放接口：输入 ' + preview.inputs.length + ' 个，输出 ' + preview.outputs.length + ' 个。' +
-      '内部保留 ' + preview.inner + ' 条连接，跨边界 ' + preview.outer + ' 条改成经过新组合。</p>' +
-      '<p>Markdown 里指向这些模块的相对链接会一起改。</p>' +
-      '<p class="warn">打包会移动目录。先确认项目已提交或已备份。</p>';
-    $('packConfirm').disabled = false;
-    return { id, name };
-  } catch (e) { toast('预览失败：' + e.message, 8000); return null; }
-}
-
 // ---- 事件 -------------------------------------------------------------------
 
 document.addEventListener('click', (e) => {
-  if (e.target.id === 'closeDocs') { $('panel').classList.remove('show'); return; }
+  if (e.target.id === 'closeDocs') { $('panel').close(); docReadSequence++; return; }
   const go = e.target.closest('[data-go]');
   if (go) { goTo(go.dataset.go); return; }
   if (e.target.matches('[data-check]')) {
@@ -553,29 +1055,55 @@ $('levelFiles').onclick = () => showDocs(state.levelId);
 $('save').addEventListener('click', save);
 $('composeSelection').onclick = () => $('pack').click();
 $('stage').addEventListener('click', e => { if (!e.target.closest('.node, .edge, button')) { pendingOutput = null; document.querySelectorAll('.port.connecting').forEach(p => p.classList.remove('connecting')); document.querySelectorAll('[data-check]').forEach(c => { c.checked = false; }); updatePackButton(); } });
-$('pack').addEventListener('click', () => { $('packForm').reset(); $('packBody').innerHTML = ''; $('packConfirm').disabled = true; $('packDialog').showModal(); });
-$('packCancel').addEventListener('click', () => $('packDialog').close());
-$('packPreview').addEventListener('click', (e) => { e.preventDefault(); previewPack(); });
-$('packConfirm').addEventListener('click', async (e) => {
-  e.preventDefault();
-  const form = $('packForm');
-  const body = { parentId: state.levelId, memberIds: selected(), id: form.id.value.trim(), name: form.name.value.trim(), fileRevisions:state.data.fileRevisions };
-  $('packDialog').close();
+let packing = false;
+async function packSelection() {
+  if (!editable || packing) return;
+  const memberIds = selected();
+  if (memberIds.length < 2) return;
+  packing = true;
+  $('pack').disabled = true; $('composeSelection').disabled = true;
   try {
-    const done = await api('/api/pack', body);
-    toast('已打包，改了 ' + (done.links || []).length + ' 处链接', 5000);
+    if (!await flushCanvas()) return;
+    const body = {parentId:state.levelId,memberIds,id:'combo_' + crypto.randomUUID().replaceAll('-',''),name:'未命名组合',fileRevisions:state.data.fileRevisions};
+    await api('/api/pack-preview',body);
+    await api('/api/pack',body);
     await reload(state.levelId);
-  } catch (err) { toast('打包失败：' + err.message, 10000); }
-});
+    toast('已组成组合，可在设置中修改名称');
+  } catch (e) { toast('打包失败：' + e.message,10000); }
+  finally { packing = false; $('composeSelection').disabled = false; updatePackButton(); }
+}
+$('pack').addEventListener('click', packSelection);
 
-$('drawerToggle').addEventListener('click', () => {
-  const closed = $('side').classList.toggle('closed');
-  $('side').inert = closed;
-  $('drawerToggle').setAttribute('aria-expanded', String(!closed));
-  $('drawerToggle').textContent = closed ? '模块列表' : '收起模块';
-  $('drawerToggle').title = closed ? '展开模块列表' : '收起模块列表';
+function setDrawer(open, restoreFocus = false) {
+  $('side').classList.toggle('closed', !open);
+  $('side').inert = !open;
+  $('drawerBackdrop').hidden = !open;
+  $('drawerToggle').setAttribute('aria-expanded', String(open));
+  $('drawerToggle').title = open ? '收起模块列表' : '展开模块列表';
+  if (restoreFocus) $('drawerToggle').focus();
+}
+$('backLevel').addEventListener('click', () => {
+  const parent = parentLevelId();
+  if (parent) goTo(parent);
 });
-$('side').addEventListener('transitionend', drawEdges);
+$('drawerToggle').addEventListener('click', () => setDrawer($('side').classList.contains('closed')));
+// 遮罩接住整次操作，避免收起时选中、拖动节点或触发连线。
+$('drawerBackdrop').addEventListener('pointerdown', e => e.preventDefault());
+$('drawerBackdrop').addEventListener('click', e => {
+  e.stopPropagation();
+  setDrawer(false, true);
+});
+$('drawerBackdrop').addEventListener('contextmenu', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  setDrawer(false, true);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('side').classList.contains('closed') && !document.querySelector('dialog[open]')) {
+    e.preventDefault();
+    setDrawer(false, true);
+  }
+});
 $('stage').addEventListener('scroll', drawEdges);
 
 window.addEventListener('message', e => {
@@ -585,8 +1113,9 @@ window.addEventListener('message', e => {
   if (el) { document.querySelectorAll('.boundary-focus').forEach(n => n.classList.remove('boundary-focus')); el.classList.add('boundary-focus'); el.scrollIntoView({block:'nearest',inline:'nearest'}); }
 });
 let editing = null, editingPorts = null, contextPoint = null;
-function settings(node) {
-  if (window.canvasHasChanges()) { toast('请先保存连线和位置，再编辑结构'); return; }
+async function settings(node) {
+  if (!editable) return;
+  if (!await flushCanvas()) return;
   editing = { ...node, description:node.description || node.responsibility || node.summary || '' }; editingPorts = structuredClone({ inputs: node.inputs || [], outputs: node.outputs || [] });
   for (const list of Object.values(editingPorts)) list.forEach(p => p.original = p.name);
   $('settingsTitle').textContent = node.name + '设置';
@@ -604,17 +1133,42 @@ function settings(node) {
   } else renderPortEditor();
   $('settingsDialog').showModal();
 }
+function nextPortName(side) {
+  const base = side === 'inputs' ? 'input' : 'output';
+  const used = new Set(editingPorts[side].map(p => p.name.trim()));
+  let name = base, index = 2;
+  while (used.has(name)) name = base + '_' + index++;
+  return name;
+}
 function renderPortEditor() {
-  $('settingsBody').innerHTML = '<label>名称<input id="moduleName" value="' + esc(editing.name) + '"></label><label>职责说明<textarea id="moduleDescription">' + esc(editing.description) + '</textarea></label><p>接口标识只能用字母、数字、下划线、短横线。每项须填写说明。</p>' + ['inputs','outputs'].map(side => '<h4>' + (side === 'inputs' ? '输入' : '输出') + '</h4><div>' + editingPorts[side].map((p,i) => '<div class="port-edit"><input aria-label="接口标识" data-side="' + side + '" data-index="' + i + '" data-field="name" value="' + esc(p.name) + '"><input aria-label="接口说明" data-side="' + side + '" data-index="' + i + '" data-field="description" value="' + esc(p.description) + '"><button data-remove="' + side + ':' + i + '">删除</button></div>').join('') + '</div><button data-new="' + side + '">新增' + (side === 'inputs' ? '输入' : '输出') + '</button>').join('');
+  $('settingsBody').innerHTML = '<label>名称<input id="moduleName" value="' + esc(editing.name) + '"></label><label>职责说明<textarea id="moduleDescription">' + esc(editing.description) + '</textarea></label><p>接口标识只能用字母、数字、下划线、短横线。每项须填写说明。</p>' + ['inputs','outputs'].map(side => '<h4>' + (side === 'inputs' ? '输入' : '输出') + '</h4><div class="port-edit port-columns"><span>接口名称</span><span>' + (side === 'inputs' ? '接收什么材料' : '交付什么结果') + '</span><span aria-hidden="true">操作</span></div><div>' + editingPorts[side].map((p,i) => '<div class="port-edit"><input aria-label="接口标识" data-side="' + side + '" data-index="' + i + '" data-field="name" value="' + esc(p.name) + '"><input aria-label="接口说明" data-side="' + side + '" data-index="' + i + '" data-field="description" value="' + esc(p.description) + '"><button data-remove="' + side + ':' + i + '">删除</button></div>').join('') + '</div><button data-new="' + side + '">新增' + (side === 'inputs' ? '输入' : '输出') + '</button>').join('');
   $('moduleName').oninput = e => { editing.name = e.target.value; };
   $('moduleDescription').oninput = e => { editing.description = e.target.value; };
   $('settingsBody').querySelectorAll('input[data-side]').forEach(el => el.oninput = () => { editingPorts[el.dataset.side][el.dataset.index][el.dataset.field] = el.value; });
-  $('settingsBody').querySelectorAll('[data-new]').forEach(el => el.onclick = () => { editingPorts[el.dataset.new].push({ name:'',description:'' }); renderPortEditor(); });
+  $('settingsBody').querySelectorAll('[data-new]').forEach(el => el.onclick = () => { editingPorts[el.dataset.new].push({ name:nextPortName(el.dataset.new),description:el.dataset.new === 'inputs' ? '待处理的材料' : '处理后的结果' }); renderPortEditor(); });
   $('settingsBody').querySelectorAll('[data-remove]').forEach(el => el.onclick = () => { const [side,i] = el.dataset.remove.split(':'); editingPorts[side].splice(Number(i),1); renderPortEditor(); });
 }
+let deletingNodes = false;
+document.addEventListener('keydown', async event => {
+  if (!editable || deletingNodes || !['Delete','Backspace'].includes(event.key)) return;
+  if (event.target.closest('input, textarea, select, [contenteditable="true"]') || document.querySelector('dialog[open]')) return;
+  const nodeIds = selected();
+  if (!nodeIds.length) return;
+  event.preventDefault();
+  deletingNodes = true;
+  try { await structural({action:'deleteNodes',nodeIds}); }
+  finally { deletingNodes = false; }
+});
 async function structural(body) {
+  if (!editable) return;
+  if (!await flushCanvas()) return;
   try {
     const next = await api('/api/settings', { ...body, levelId:state.levelId, fileRevisions:state.data.fileRevisions });
+    if (body.action === 'deleteNodes') {
+      for (const frame of frameCache.values()) frame.remove();
+      frameCache.clear();
+      document.querySelectorAll('#board iframe').forEach(frame => frame.remove());
+    }
     $('settingsDialog').close(); state.data = next; openLevel(state.levelId, false); toast('已写入项目文件');
   } catch (e) { toast('保存失败：' + e.message, 10000); }
 }
@@ -648,27 +1202,41 @@ $('settingsSave').onclick = () => {
   structural({ action:'ports',nodeId:editing.id,name:editing.name,description:editing.description,removals:deleted,inputs:editingPorts.inputs.map(({name,description}) => ({name,description})),outputs:editingPorts.outputs.map(({name,description}) => ({name,description})),renames });
 };
 $('stage').addEventListener('contextmenu', e => {
-  if (e.target.closest('.node, .edge, button')) return;
-  e.preventDefault(); const bounds = $('stage').getBoundingClientRect(), scale = state.positions.$view?.zoom || 1; contextPoint = { x:(e.clientX-bounds.left+$('stage').scrollLeft)/scale, y:(e.clientY-bounds.top+$('stage').scrollTop)/scale };
+  if (!editable || e.target.closest('.node, .edge, button')) return;
+  e.preventDefault(); const bounds = $('stage').getBoundingClientRect(), scale = state.positions.$view?.zoom || 1; contextPoint = { x:(e.clientX-bounds.left+$('stage').scrollLeft-(state.positions.$view?.panX || 0))/scale, y:(e.clientY-bounds.top+$('stage').scrollTop-(state.positions.$view?.panY || 0))/scale };
   $('contextMenu').hidden = false; $('contextMenu').style.left = Math.min(e.clientX,innerWidth-180)+'px'; $('contextMenu').style.top = Math.min(e.clientY,innerHeight-100)+'px';
 });
 let creatingModule = false;
 $('addModule').onclick = async () => {
   $('contextMenu').hidden = true;
   if (creatingModule) return;
-  if (window.canvasHasChanges()) { toast('请先保存连线和位置，再添加模块'); return; }
+  if (!await flushCanvas()) return;
   creatingModule = true;
   try { await structural({action:'createModule',position:contextPoint}); }
   finally { creatingModule = false; }
 };
-$('contextMenu').querySelectorAll('[data-add]').forEach(button => button.onclick = () => {
+$('contextMenu').querySelectorAll('[data-add]').forEach(button => button.onclick = async () => {
   $('contextMenu').hidden = true;
-  settings({ id:'io_' + Date.now(), type:button.dataset.add, name:button.dataset.add === 'input' ? '输入':'输出', description:'' });
+  if (creatingModule) return;
+  creatingModule = true;
+  const type = button.dataset.add;
+  try {
+    await structural({
+      action:'io',
+      position:contextPoint,
+      node:{
+        id:'io_' + crypto.randomUUID().replaceAll('-',''),
+        type,
+        name:type === 'input' ? '输入' : '输出',
+        description:type === 'input' ? '待处理的材料' : '处理后的结果',
+      },
+    });
+  } finally { creatingModule = false; }
 });
 document.addEventListener('click', e => { if (!e.target.closest('#contextMenu')) $('contextMenu').hidden = true; });
 let checking = false;
 async function checkExternal() {
-  if (checking || !state.data || $('settingsDialog').open || $('packDialog').open || $('edgeDialog').open || linking || pendingOutput) return;
+  if (checking || saving || packing || $('draftDialog').open || !state.data || $('panel').open || $('settingsDialog').open || !$('linkMenu').hidden || linking || pendingOutput) return;
   checking = true;
   try {
     const latest = await api('/api/project');
@@ -685,6 +1253,91 @@ setInterval(checkExternal, 4000);
 window.canvasHasChanges = () => state.dirty || [...new Set([...frameCache.values(), ...document.querySelectorAll('iframe')])].some(f => f.contentWindow?.canvasHasChanges?.());
 // 不拦截浏览器刷新：内嵌浏览器可能无法显示离开确认框。
 window.addEventListener('resize', drawEdges);
+const embedded = window.parent !== window;
+$('drawerToggle').hidden = embedded;
+$('openDrafts').hidden = embedded;
+$('showFormal').hidden = !editable || embedded;
+$('saveStatus').textContent = editable ? '草稿已保存' : '显示模式 · 只读';
+let draftBusy = false;
+async function switchDraft(id, beforeSwitch) {
+  if (draftBusy) return;
+  draftBusy = true;
+  try {
+    if (!await flushCanvas()) return;
+    const next = beforeSwitch ? await beforeSwitch() : id;
+    const target = new URL('/',location.origin);
+    if (next) target.searchParams.set('draft',next);
+    location.assign(target);
+  } catch (error) { toast(error.message,6500,true); }
+  finally { draftBusy = false; }
+}
+async function refreshDraftList() {
+  const drafts = await api('/api/drafts');
+  const current = drafts.find(d => d.id === draftId);
+  if (current) $('openDrafts').textContent = '草稿：' + current.name;
+  $('draftList').replaceChildren();
+  for (const draft of drafts) {
+    const row = document.createElement('div'); row.className = 'draft-item';
+    const name = document.createElement('strong'); name.textContent = draft.name + (draft.id === draftId ? '（当前）' : '');
+    const details = document.createElement('div'); details.className = 'draft-details';
+    details.textContent = '最后保存：' + new Date(draft.savedAt).toLocaleString();
+    if (draft.stale) {
+      const status = document.createElement('span'); status.className = 'draft-stale';
+      status.textContent = ' · 基于旧版项目'; details.append(status);
+    }
+    const actions = document.createElement('div'); actions.className = 'draft-actions';
+    const add = (label, action) => {
+      const button = document.createElement('button'); button.textContent = label;
+      button.onclick = async () => {
+        try { await action(); } catch (error) { $('draftMessage').textContent = error.message; }
+      };
+      actions.append(button);
+    };
+    add('打开', () => switchDraft(draft.id));
+    add('复制草稿路径', async () => { await navigator.clipboard.writeText(draft.path); $('draftMessage').textContent = '已复制草稿路径'; });
+    add('重命名', () => {
+      actions.replaceChildren();
+      const input = document.createElement('input');
+      input.value = draft.name; input.maxLength = 80; input.setAttribute('aria-label','新的草稿名称');
+      const apply = document.createElement('button'); apply.textContent = '保存名称';
+      apply.onclick = async () => {
+        try { await api('/api/drafts/rename',{id:draft.id,name:input.value}); await refreshDraftList(); }
+        catch (error) { $('draftMessage').textContent = error.message; }
+      };
+      const cancel = document.createElement('button'); cancel.textContent = '取消';
+      cancel.onclick = () => refreshDraftList();
+      actions.append(input,apply,cancel); input.focus();
+    });
+    add('删除', () => {
+      actions.replaceChildren();
+      const message = document.createElement('span'); message.textContent = '确定删除这份草稿？';
+      const apply = document.createElement('button'); apply.textContent = '确认删除';
+      apply.onclick = async () => {
+        try {
+          if (draft.id === draftId) return await switchDraft(null,async()=>{ await api('/api/drafts/delete',{id:draft.id}); return null; });
+          await api('/api/drafts/delete',{id:draft.id}); await refreshDraftList();
+        } catch (error) { $('draftMessage').textContent = error.message; }
+      };
+      const cancel = document.createElement('button'); cancel.textContent = '取消';
+      cancel.onclick = () => refreshDraftList();
+      actions.append(message,apply,cancel);
+    });
+    row.append(name,details,actions); $('draftList').append(row);
+  }
+  if (!drafts.length) $('draftList').textContent = '还没有草稿。';
+}
+$('openDrafts').onclick = async () => {
+  $('draftMessage').textContent = '';
+  $('draftDialog').showModal();
+  try { await refreshDraftList(); } catch (error) { $('draftMessage').textContent = error.message; }
+};
+$('closeDrafts').onclick = () => $('draftDialog').close();
+$('showFormal').onclick = () => switchDraft(null);
+$('newDraft').onsubmit = event => {
+  event.preventDefault();
+  switchDraft(null,async()=>(await api('/api/drafts/create',{name:'未命名草稿'})).id);
+};
+if (draftId && !embedded) refreshDraftList().catch(error=>toast(error.message,6500,true));
 reload();
 </script>
 </body>
