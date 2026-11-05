@@ -137,6 +137,7 @@
   .io-description { color:#65798b; }
   #edges .edge .line { stroke:#478e9e; stroke-width:2.2; }
   #edges .edge:hover .line { stroke:#087c9b; stroke-width:4; }
+  #edges .edge.node-related .line { stroke:#087c9b; stroke-width:4; marker-end:url(#arrow-highlight); }
   #edges text { fill:#354f60; font:12px system-ui; }
   .inline-canvas { border-color:#aebfcd; }
   #panel { width:min(440px, 100%); border-color:#d8e0e7; color:#243746; box-shadow:-4px 0 16px #2233440a; }
@@ -502,6 +503,8 @@ function render() {
     el.style.left = pos.x + 'px';
     el.style.top = pos.y + 'px';
     el.dataset.id = node.id;
+    el.addEventListener('mouseenter', () => highlightNodeEdges(node.id));
+    el.addEventListener('mouseleave', () => highlightNodeEdges(null));
     el.innerHTML =
       '<div class="head"><button data-settings aria-label="' + esc(node.name) + '设置" class="gear">⚙</button>' + esc(node.name) +
         '<small>' + (node.boundary ? (node.type === 'input' ? '组合输入' : '组合输出') : node.type ? '独立' + (node.type === 'input' ? '输入' : '输出') : esc(node.id)) + (node.isCombo ? ' · 双击进入' : node.type ? '' : ' · 双击看文件') + '</small></div>' +
@@ -673,9 +676,19 @@ function connectionRoute(a,b,{boxes=[],source,target,index=0,used=[],returning=f
  return {path:roundedRoute(path),label,feedback,points,unresolved,bottom:Math.max(...points.map(p=>p.y))+40};
 }
 
+function highlightNodeEdges(nodeId) {
+  document.querySelectorAll('#edges .edge').forEach(edge => {
+    edge.classList.toggle('node-related', nodeId !== null && (edge.dataset.source === nodeId || edge.dataset.target === nodeId));
+  });
+}
+
 function drawEdges() {
   const svg = $('edges');
   svg.innerHTML = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#426b78"/></marker></defs>';
+  const highlightArrow = svg.querySelector('#arrow').cloneNode(true);
+  highlightArrow.id = 'arrow-highlight';
+  highlightArrow.querySelector('path').setAttribute('fill', '#087c9b');
+  svg.querySelector('defs').append(highlightArrow);
   const bounds = $('stage').getBoundingClientRect();
   const stage = $('stage');
   svg.style.width = stage.scrollWidth + 'px'; svg.style.height = stage.scrollHeight + 'px';
@@ -696,6 +709,8 @@ function drawEdges() {
     path.setAttribute('d', route.path);
     const group = document.createElementNS(svg.namespaceURI, 'g');
     group.setAttribute('class', 'edge');
+    group.dataset.source = from.closest('.node').dataset.id;
+    group.dataset.target = to.closest('.node').dataset.id;
     path.setAttribute('marker-end', 'url(#arrow)');
     const hit = path.cloneNode(); hit.setAttribute('class', 'hit'); hit.removeAttribute('marker-end');
     group.append(path, hit); svg.append(group);
@@ -721,6 +736,7 @@ function drawEdges() {
       group.append(label);
     }
   });
+  highlightNodeEdges($('board').querySelector('.node:hover')?.dataset.id ?? null);
 }
 
 function startResize(event, el, id, direction) {
