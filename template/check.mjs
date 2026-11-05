@@ -256,4 +256,4 @@ if (errors.length) { for (const e of errors) console.error(e); process.exit(1); 
 
 const pending = all.filter(n => n.meta.status === 'pending').length;
 console.log('结构检查通过：' + all.length + ' 个模块' + (pending ? '；其中 ' + pending + ' 个待配置，不得运行' : ''));
-if (process.argv.includes('--verify')) console.log('维护验收通过 ' + ran + ' 项，跳过 ' + skipped + ' 项；这只说明示例能跑，不代表业务内容合格。');
+if (process.argv.includes('--verify')) console.log('维护验收通过 ' + ran + ' 项，跳过 ' + skipped + ' 项；这只说明各模块自带验收脚本通过，不代表业务内容合格。');
