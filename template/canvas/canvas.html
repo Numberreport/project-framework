@@ -238,6 +238,7 @@
 </div>
 <div id="canvasNavigation"><button id="drawerToggle" aria-controls="side" aria-expanded="false" title="展开模块列表">模块</button><button id="backLevel" hidden>← 返回上一级</button><button id="openDrafts">草稿</button><button id="showFormal" hidden>返回显示模式</button></div>
 <div id="saveStatus" role="status" aria-live="polite">显示模式 · 只读</div>
+<div id="structureError" role="alert" hidden style="position:fixed;top:64px;left:16px;right:16px;z-index:20;padding:16px;background:#fff0ec;color:#842b20;border:1px solid #d79c8b"></div>
 <div id="stage">
   <div id="zoomControls" style="position:fixed;right:16px;bottom:12px;z-index:3;background:white"><button id="zoomOut" aria-label="缩小">−</button><span id="zoomValue">100%</span><button id="zoomIn" aria-label="放大">＋</button></div>
   <button id="composeSelection" hidden style="position:fixed;top:12px;left:50%;z-index:4">组成组合</button>
@@ -294,13 +295,25 @@ function toast(text, ms, warning = false) {
   toastTimer = setTimeout(() => el.hidePopover(), ms || 4500);
 }
 
+function formalError(message = '') {
+  if (editable) return;
+  $('structureError').hidden = !message;
+  $('structureError').textContent = message ? '正式结构无法读取，已暂停显示，避免继续展示旧结构：' + message : '';
+  $('board').hidden = Boolean(message);
+  $('edges').style.visibility = message ? 'hidden' : '';
+  if (message) $('saveStatus').textContent = '正式结构异常 · 等待修复';
+  else $('saveStatus').textContent = '正式版本 · 与项目文件同步';
+}
+
 async function reload(levelId) {
   try {
     state.data = await api('/api/project');
+    formalError();
     levelId = levelId || new URLSearchParams(location.search).get('scope');
     if (!state.data.levels[levelId]) levelId = state.data.root.id;
     openLevel(levelId || new URLSearchParams(location.search).get('scope'), true);
   } catch (e) {
+    formalError(e.message);
     toast('读取失败：' + e.message, 8000);
   }
 }
@@ -1252,15 +1265,16 @@ $('contextMenu').querySelectorAll('[data-add]').forEach(button => button.onclick
 document.addEventListener('click', e => { if (!e.target.closest('#contextMenu')) $('contextMenu').hidden = true; });
 let checking = false;
 async function checkExternal() {
-  if (checking || saving || packing || $('draftDialog').open || !state.data || $('panel').open || $('settingsDialog').open || !$('linkMenu').hidden || linking || pendingOutput) return;
+  if (checking || saving || packing || $('draftDialog').open || (!state.data && editable) || $('panel').open || $('settingsDialog').open || !$('linkMenu').hidden || linking || pendingOutput) return;
   checking = true;
   try {
     const latest = await api('/api/project');
-    if (JSON.stringify(latest.fileRevisions) !== JSON.stringify(state.data.fileRevisions) || JSON.stringify(latest.layout) !== JSON.stringify(state.data.layout)) {
+    formalError();
+    if (!state.data || latest.sourceVersion !== state.data.sourceVersion || JSON.stringify(latest.fileRevisions) !== JSON.stringify(state.data.fileRevisions) || JSON.stringify(latest.layout) !== JSON.stringify(state.data.layout)) {
       if (window.canvasHasChanges()) toast('项目文件已在外部修改，请核对后再保存。当前草稿已保留。', 7000);
-      else { state.data = latest; openLevel(state.levelId, false); toast('已同步项目文件'); }
+      else { state.data = latest; openLevel(latest.levels[state.levelId] ? state.levelId : latest.root.id, false); toast('已同步项目文件'); }
     }
-  } catch (e) { toast('同步失败：' + e.message,7000); }
+  } catch (e) { formalError(e.message); toast('同步失败：' + e.message,7000); }
   finally { checking = false; }
 }
 window.addEventListener('focus', checkExternal);

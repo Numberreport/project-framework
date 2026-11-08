@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { join, relative, isAbsolute, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readProject } from './structure.mjs';
 
 const VERSION = '3.0.0';
 const REQUIRED = ['README.md', 'VALIDATION.md', 'module.json'];
@@ -186,10 +187,12 @@ function checkLinks(dir) {
 
 const ids = new Set();
 const tree = visit(root, ids, new Set(), null);
+// 正式画布和执行入口使用的读取规则也必须通过，禁止各自接受不同结构。
+try { readProject(root); } catch (error) { fail(error.message); }
 const all = tree ? [tree, ...walkAll(tree)] : [];
 
 // 根目录只放登记过的文件，防止临时文件、密钥混进来。
-const ROOT_ALLOWED = new Set(['README.md', 'AGENTS.md', 'VALIDATION.md', 'canvas', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas-layout.json', 'tests', 'workspace']);
+const ROOT_ALLOWED = new Set(['structure.mjs', 'run.mjs', 'README.md', 'AGENTS.md', 'VALIDATION.md', 'canvas', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas-layout.json', 'tests', 'workspace']);
 const ROOT_IGNORED = new Set(['node_modules', 'dist', 'build', '__pycache__', 'venv', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'Makefile', 'Thumbs.db', 'desktop.ini']);
 for (const entry of readdirSync(root)) {
   if (entry.startsWith('.') || ROOT_ALLOWED.has(entry) || ROOT_IGNORED.has(entry)) continue;

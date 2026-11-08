@@ -26,7 +26,7 @@ const FILES = { 'README.md': README, 'VALIDATION.md': VALIDATION };
 const addModule = (p, id, name, extra = {}) => {
   const dir = join(p, 'modules', id);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'module.json'), JSON.stringify({ id, name, template: { id: 'project-framework', version: '3.0.0' }, status: 'ready', ...extra }, null, 2) + '\n');
+  writeFileSync(join(dir, 'module.json'), JSON.stringify({ id, name, template: { id: 'project-framework', version: '3.0.0' }, status: 'ready', implementation:'README.md', ...extra }, null, 2) + '\n');
   for (const [file, text] of Object.entries(FILES)) writeFileSync(join(dir, file), text);
 };
 const seed = (p) => {

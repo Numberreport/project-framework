@@ -56,7 +56,7 @@ function seed(project) {
   for (const id of ['a', 'b']) {
     const dir = join(project, 'modules', id);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'module.json'), JSON.stringify({ id, name: id === 'a' ? '甲' : '乙', template: { id: 'project-framework', version: '3.0.0' }, status: 'ready' }, null, 2) + '\n');
+    writeFileSync(join(dir, 'module.json'), JSON.stringify({ id, name: id === 'a' ? '甲' : '乙', template: { id: 'project-framework', version: '3.0.0' }, status: 'ready', implementation:'README.md' }, null, 2) + '\n');
     writeFileSync(join(dir, 'README.md'), README);
     writeFileSync(join(dir, 'VALIDATION.md'), VALIDATION);
   }

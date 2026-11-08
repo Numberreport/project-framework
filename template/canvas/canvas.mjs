@@ -10,6 +10,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, cpSync,
 import { join, dirname, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
+import { readProject, projectVersion } from '../structure.mjs';
 
 // 默认读取画布目录的上一级项目；createCanvas(某个目录) 可以指到别处，测试和复用都靠这个。
 let ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -51,35 +52,7 @@ const readJson = (path) => { try { return JSON.parse(readText(path)); } catch { 
 // ---- 读取项目结构 -----------------------------------------------------------
 
 // 读一个模块；有 modules/ 就是组合，接着读它的成员。
-export function scan(dir) {
-  const meta = readJson(join(dir, 'module.json'));
-  if (!meta || typeof meta.id !== 'string') throw Error('模块缺少有效的 module.json：' + rel(dir));
-  const node = { dir, label: rel(dir), meta, id: meta.id, name: String(meta.name || meta.id), children: [], links: [], stop: '', isCombo: false, inputs: [], outputs: [] };
-  // 接口只来自 README：接收的在「输入」小节，交出的在「输出」小节。根目录和模块一样。
-  const text = readText(join(dir, 'README.md'));
-  const parse = (json) => { try { return JSON.parse(json); } catch { return []; } };
-  const blockIn = (scope) => { const b = /```interfaces[ \t]*\r?\n([^]*?)\r?\n```/.exec(scope); return b ? parse(b[1]) : []; };
-  const sect = (title) => new RegExp('^##[ \\t]*' + title + '[ \\t]*\\r?\\n([^]*?)(?=^## |$(?![^]))', 'm').exec(text)?.[1] || '';
-  node.inputs = blockIn(sect('输入'));
-  node.outputs = blockIn(sect('输出'));
-  const members = join(dir, 'modules');
-  if (existsSync(members) && statSync(members).isDirectory()) {
-    node.isCombo = true;
-    for (const item of readdirSync(members, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (item.name.startsWith('.') || !statSync(join(members, item.name)).isDirectory()) continue;
-      node.children.push(scan(join(members, item.name)));
-    }
-    const data = readJson(join(dir, 'connections.json'));
-    if (!data || !Array.isArray(data.connections)) throw Error('组合缺少 connections.json：' + rel(dir));
-    node.ioNodes = data.ioNodes || [];
-    validateIO(node.ioNodes);
-    const occupied = new Set(node.children.map(c => c.id));
-    if (node.ioNodes.some(n => occupied.has(n.id))) throw Error('输入输出节点标识与模块重复');
-    node.links = data.connections;
-    node.stop = typeof data.stop === 'string' ? data.stop : '';
-  }
-  return node;
-}
+export const scan = readProject;
 
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
 const findNode = (tree, id) => flatten(tree).find(n => n.id === id);
@@ -377,6 +350,7 @@ function snapshot() {
   collect(tree);
   const pick = (path) => existsSync(path) ? readText(path) : '';
   return {
+    sourceVersion: projectVersion(tree),
     fileRevisions: revisions(tree),
     root: { id: tree.id, name: tree.name, label: tree.label },
     levels, layout,
@@ -608,7 +582,7 @@ export function createCanvas(rootDir = ROOT) {
   const drafts = join(formal, '.canvas-drafts');
   const secret = randomBytes(24).toString('hex');
   const tokenFor = id => hash(secret + ':' + (id || 'display'));
-  const formalVersion = () => inProject(formal, () => hash(JSON.stringify(revisions(loadTree()))));
+  const formalVersion = () => inProject(formal, () => projectVersion(loadTree()));
   const folder = id => {
     if (!/^[a-f0-9]{24}$/.test(id || '')) throw Error('草稿标识无效');
     if (realpathSync(drafts) !== drafts) throw Error('草稿目录不可用');
@@ -646,7 +620,7 @@ export function createCanvas(rootDir = ROOT) {
           return !name.startsWith('.') && !excluded.has(name) && !/\.(pem|key)$/i.test(name) && realpathSync(source)===source;
         }});
       }
-      if (formalVersion() !== base || inProject(path,()=>hash(JSON.stringify(revisions(loadTree())))) !== base) throw Error('项目在复制期间发生变化，请重试');
+      if (formalVersion() !== base || inProject(path,()=>projectVersion(loadTree())) !== base) throw Error('项目在复制期间发生变化，请重试');
       inProject(path,addCombinationSources);
       writeMetadata(path,{name,base,savedAt:new Date().toISOString()});
       return {id,path};
