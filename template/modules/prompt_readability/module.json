@@ -1,7 +1,10 @@
 {
   "id": "prompt_readability",
-  "name": "提示词可读性检查",
-  "template": { "id": "project-framework", "version": "3.0.0" },
+  "name": "文档与提示词可读性检查",
+  "template": {
+    "id": "project-framework",
+    "version": "3.0.0"
+  },
   "status": "ready",
   "processor": "ai",
   "implementation": "implementation/prompt.md"

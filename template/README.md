@@ -26,7 +26,7 @@
 
 ## 处理流程
 
-方法、做事要求和检查命令都在 [AGENTS.md](AGENTS.md)。模块在 `modules/` 下，每个模块的说明看它自己的 README。项目口径检查使用独立入口，调用方式见[检查模块](modules/project_consistency/README.md)，不作为项目对外业务接口；建项时保留该模块。[提示词可读性检查](modules/prompt_readability/README.md)也可独立调用，按项目现行提示词写法规范报告问题，修复由当前智能体处理。
+方法、做事要求和检查命令都在 [AGENTS.md](AGENTS.md)。模块在 `modules/` 下，每个模块的说明看它自己的 README。项目口径检查使用独立入口，调用方式见[检查模块](modules/project_consistency/README.md)，不作为项目对外业务接口；建项时保留该模块。[文档与提示词可读性检查](modules/prompt_readability/README.md)也可独立调用，按项目现行的通用文档规范和文件专用要求报告问题，修复由当前智能体处理。
 
 建成新项目后，这一份也要改成自己的：职责、输入、输出、处理流程各写实际的内容，没用到框架反馈时把它的接口和连线一起删掉。
 
