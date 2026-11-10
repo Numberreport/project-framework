@@ -4,7 +4,7 @@
 
 适合让 AI 长期做的项目，不限编程。项目照 `template/` 搭。
 
-智能体先读 `AGENTS.md`。
+智能体先读[模板规则](template/AGENTS.md)。模板复制到新项目后，读取新项目根目录的 `AGENTS.md`。
 
 ## 怎么用
 
