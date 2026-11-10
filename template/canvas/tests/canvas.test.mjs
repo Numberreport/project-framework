@@ -372,4 +372,15 @@ test('批量删除节点同时清除连线与布局，正式节点保留',()=>wi
  if(s.error)throw Error(s.error);
  if(s.levels[s.root.id].members.some(n=>['a','b'].includes(n.id))||s.levels[s.root.id].links.length)throw Error('删除后残留节点或连线');
  if(existsSync(project+'/modules/a')||!existsSync(formal+'/modules/a'))throw Error('删除范围不正确');
+ const {pathToFileURL}=await import('node:url');
+ const {readProject}=await import(pathToFileURL(project+'/structure.mjs').href);
+ let rejected=false;
+ try { readProject(project); } catch(error) { if(!/输出没有来源/.test(error.message))throw error; rejected=true; }
+ if(!rejected)throw Error('正式读取放过未接回的输出');
+ readProject(formal);
+ // 草稿仍可继续接线；补齐输出后不再需要放宽读取。
+ s=await call('/api/save',{levelId:s.root.id,revision:s.revisions[s.root.id],fileRevisions:s.fileRevisions,
+   links:[{from:{module:'$self',port:'text'},to:{module:'$self',port:'result'},info:'直接交付'}],positions:{}});
+ if(s.error)throw Error(s.error);
+ readProject(project);
 }));

@@ -24,7 +24,7 @@ export function readPorts(text, title, label = '') {
   return ports;
 }
 
-export function readProject(rootDir) {
+export function readProject(rootDir, { allowIncompleteOutputs = false } = {}) {
   const root = realpathSync(rootDir), ids = new Set(), paths = new Set();
   const files = new Map(), directories = new Map();
   const source = path => { const text = read(path); files.set(path,text); return text; };
@@ -79,7 +79,7 @@ export function readProject(rootDir) {
     return node;
   };
   const tree = load(root);
-  validateConnections(tree);
+  validateConnections(tree, { allowIncompleteOutputs });
   Object.defineProperty(tree,'assertCurrent',{value:() => {
     for (const [path,text] of files) if (read(path) !== text) throw Error('读取期间项目结构已变化，请重试');
     for (const [dir,value] of directories) if (shape(dir) !== value) throw Error('读取期间模块目录已变化，请重试');
@@ -88,7 +88,7 @@ export function readProject(rootDir) {
   return tree;
 }
 
-export function validateConnections(tree) {
+export function validateConnections(tree, { allowIncompleteOutputs = false } = {}) {
   for (const level of flatten(tree).filter(n => n.isCombo)) {
     const endpoints = new Map([['$self', {outputs:level.inputs, inputs:level.outputs}], ...level.children.map(n => [n.id,n]),
       ...level.ioNodes.map(n => [n.id, {inputs:n.type === 'output' ? [{name:'value'}] : [], outputs:n.type === 'input' ? [{name:'value'}] : []}])]);
@@ -102,7 +102,7 @@ export function validateConnections(tree) {
       if (edge.when !== undefined && (typeof edge.when !== 'string' || !edge.when.trim())) throw Error('连接条件留空：' + level.label);
       if (edge.kind !== undefined && !['support','return'].includes(edge.kind)) throw Error('连接 kind 只能取 support 或 return：' + level.label);
     }
-    for (const port of level.meta.status === 'ready' ? level.outputs : []) {
+    for (const port of !allowIncompleteOutputs && level.meta.status === 'ready' ? level.outputs : []) {
       if (!level.links.some(edge => edge.to.module === '$self' && edge.to.port === port.name)) {
         throw Error('组合交付没有接回本层，输出没有来源：' + level.label + '.' + port.name);
       }

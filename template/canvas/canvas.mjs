@@ -57,7 +57,10 @@ export const scan = readProject;
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
 const findNode = (tree, id) => flatten(tree).find(n => n.id === id);
 
-function loadTree() { return scan(ROOT); }
+function loadTree() {
+  // 草稿允许先拆线再重接；正式读取和执行仍逐项检查输出来源。
+  return scan(ROOT, { allowIncompleteOutputs: ROOT.split(/[\\/]/).includes('.canvas-drafts') });
+}
 function readLayout() {
   const data = readJson(join(ROOT, LAYOUT));
   return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
