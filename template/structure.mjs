@@ -102,6 +102,11 @@ export function validateConnections(tree) {
       if (edge.when !== undefined && (typeof edge.when !== 'string' || !edge.when.trim())) throw Error('连接条件留空：' + level.label);
       if (edge.kind !== undefined && !['support','return'].includes(edge.kind)) throw Error('连接 kind 只能取 support 或 return：' + level.label);
     }
+    for (const port of level.meta.status === 'ready' ? level.outputs : []) {
+      if (!level.links.some(edge => edge.to.module === '$self' && edge.to.port === port.name)) {
+        throw Error('组合交付没有接回本层，输出没有来源：' + level.label + '.' + port.name);
+      }
+    }
   }
 }
 

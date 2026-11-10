@@ -248,7 +248,12 @@ const placeMembers = (node) => {
 placeMembers(tree);
 if (process.argv.includes('--verify')) {
   for (const node of order) {
-    if (node.meta.status !== 'ready' || node.children.some(n => failed.has(n)) || isBlocked(node)) { failed.add(node); skipped++; console.log('跳过验收：' + node.label + '（待配置或上游未通过）'); continue; }
+    if (node.meta.status !== 'ready' || node.children.some(n => failed.has(n)) || isBlocked(node)) {
+      failed.add(node); skipped++;
+      console.log('跳过验收：' + node.label + '（待配置或上游未通过）');
+      if (node.meta.verify) fail('验收未完成：' + node.label + '（已声明的验收脚本被跳过）');
+      continue;
+    }
     if (!node.meta.verify) { skipped++; continue; }
     const result = spawnSync(process.execPath, [join(node.dir, node.meta.verify)], { cwd: node.dir, encoding: 'utf8', timeout: 60000 });
     if (result.status !== 0 || result.error) { failed.add(node); fail('验收失败：' + node.label + '\n' + (result.stderr || result.stdout || result.error?.message || '超时或异常退出')); }
@@ -259,4 +264,4 @@ if (errors.length) { for (const e of errors) console.error(e); process.exit(1); 
 
 const pending = all.filter(n => n.meta.status === 'pending').length;
 console.log('结构检查通过：' + all.length + ' 个模块' + (pending ? '；其中 ' + pending + ' 个待配置，不得运行' : ''));
-if (process.argv.includes('--verify')) console.log('维护验收通过 ' + ran + ' 项，跳过 ' + skipped + ' 项；这只说明各模块自带验收脚本通过，不代表业务内容合格。');
+if (process.argv.includes('--verify')) console.log('维护验收：脚本通过 ' + ran + ' 项，跳过 ' + skipped + ' 项；仅已执行且通过的脚本有验收结果，不代表业务内容合格。');

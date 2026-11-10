@@ -98,6 +98,16 @@ test('模块输出不符合接口时，下游不能执行',()=>fixture(async roo
   await assert.rejects(runProject(root,{text:'x'}),/输出缺少接口/);
 }));
 
+test('项目漏接任一输出时，在程序写文件前拒绝',()=>fixture(async root=>{
+  writeFileSync(join(root,'README.md'),doc(['text'],['result','extra']));
+  const marker=join(root,'workspace','written.txt');
+  writeFileSync(join(root,'modules/a/run.mjs'),
+    "import {writeFileSync,mkdirSync} from 'node:fs'; import {join} from 'node:path'; export const run=({text},c)=>{const p=join(c.directory,'../../workspace');mkdirSync(p,{recursive:true});writeFileSync(join(p,'written.txt'),'changed');return {text};};");
+  assert.throws(()=>readProject(root),/输出没有来源/);
+  await assert.rejects(runProject(root,{text:'x'}),/输出没有来源/);
+  assert.equal(existsSync(marker),false);
+}));
+
 test('后续模块缺入口或未完成时，在执行任何本体前拒绝',()=>fixture(async root=>{
   let called=false;
   updateMeta(root,'b',m=>delete m.implementation);

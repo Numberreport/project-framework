@@ -194,6 +194,19 @@ test('待配置模块被跳过，依赖它的成员和组合也跳过', () => fi
   assert.equal((r.text.match(/✓ 验收通过/g) || []).length, 0);
 }));
 
+test('项目声明的验收被待配置成员阻断时不能报告成功', () => fixture(p => {
+  edit(p, 'module.json', d => d.verify = 'modules/a/verify.mjs');
+  writeFileSync(join(p, 'modules/a/verify.mjs'), 'throw Error("不应执行");');
+  edit(p, leaf + '/module.json', d => d.status = 'pending');
+  bad(p, /验收未完成：\.（已声明的验收脚本被跳过）/, ['--verify']);
+}));
+
+test('项目每个输出都必须有内部来源', () => fixture(p => {
+  const path = join(p, 'README.md');
+  writeFileSync(path, readFileSync(path, 'utf8').replace('"name": "result",', '"name": "extra", "description": "额外交付" }, { "name": "result",'));
+  bad(p, /输出没有来源：\.\.extra/);
+}));
+
 test('文档坏链接', () => fixture(p => {
   writeFileSync(join(p, 'AGENTS.md'), readFileSync(join(p, 'AGENTS.md'), 'utf8') + '\n[坏链接](missing.md)\n');
   bad(p, /文档链接缺失/);
