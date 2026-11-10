@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readProject, projectVersion } from '../structure.mjs';
 import { executionPlan, runProject } from '../run.mjs';
 import { createCanvas } from '../canvas/canvas.mjs';
@@ -37,6 +38,32 @@ const updateMeta = (root,id,change) => {
   const path = join(root,'modules',id,'module.json');
   const meta = JSON.parse(readFileSync(path,'utf8')); change(meta); json(path,meta);
 };
+
+for (const checkerId of ['project_consistency', 'prompt_readability']) {
+  test(`模板检查模块 ${checkerId} 可单独接入 AI，不参与根项目业务调度`, async () => {
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const moduleDir = join(root, 'modules', checkerId);
+    const plan = executionPlan(root);
+    assert.ok(!plan.project.members.some(member => member.id === checkerId));
+    const tree = readProject(root);
+    assert.ok(tree.children.some(member => member.id === checkerId));
+    assert.ok(!tree.links.some(edge => [edge.from.module, edge.to.module].includes(checkerId)));
+    const request = { project:root, scope:'修改后检查', changes:['AGENTS.md'], taskDirectory:join(root,'workspace','consistency-test') };
+    let calls = 0;
+    const result = await runProject(moduleDir, {request}, {
+      executeAI: async ({prompt, values, outputs}) => {
+        calls++;
+        assert.equal(prompt,readFileSync(join(moduleDir,'implementation','prompt.md'),'utf8'));
+        assert.deepEqual(values,{request});
+        assert.deepEqual(outputs.map(port=>port.name),['report']);
+        return {report:'受控接力结果，仅验证调用关系'};
+      },
+    });
+    assert.equal(calls,1);
+    assert.equal(result.outputs.report,'受控接力结果，仅验证调用关系');
+  });
+
+}
 
 test('正式画布和实际执行共用同一份连线，改线立即改变接力顺序',()=>fixture(async root=>{
   const server=createCanvas(root);

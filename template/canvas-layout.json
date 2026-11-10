@@ -51,6 +51,14 @@
     "io_f5f783d30d1e4d2c8d775121ea068bce": {
       "x": 1214,
       "y": 763
+    },
+    "project_consistency": {
+      "x": 124,
+      "y": 1230
+    },
+    "prompt_readability": {
+      "x": 684,
+      "y": 1230
     }
   },
   "combo_2cdba77fc61b442cb79f9ca78acc1843": {
