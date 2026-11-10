@@ -242,7 +242,7 @@ const e_from_key = (e) => e.from.module + '.' + e.from.port;
 const sameEnds = (a, b) => e_from_key(a) === e_from_key(b) && a.to.module + '.' + a.to.port === b.to.module + '.' + b.to.port;
 
 // 新组合的说明书和检查标准。打包能确定的是成员和连接；职责和检查标准留给人补。
-// 写成「待补充」而不是 `<待填写>`，检查脚本认后者是在建的样子，前者是能跑的初稿。
+// 新组合保持 pending；补齐说明和检查标准并自查通过后，才能改为 ready。
 function writeCombo(plan) {
   const portBlock = (ports) => '```interfaces\n' + JSON.stringify(ports, null, 2) + '\n```';
   const memberList = plan.members.map(m => '- ' + m.name + '（' + m.id + '）').join('\n');
