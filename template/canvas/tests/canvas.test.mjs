@@ -74,7 +74,7 @@ function withCanvas(name, cases) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-canvas-'));
   const project = join(dir, 'project');
   try {
-    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || ['framework_feedback', 'ai_example', 'project_consistency', 'prompt_readability'].includes(basename(path))) });
+    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || ['framework_feedback', 'ai_example', 'project_consistency', 'prompt_readability', 'project_overall'].includes(basename(path))) });
     seed(project);
     mkdirSync(join(project, 'tests'), { recursive: true }); writeFileSync(join(project, 'tests/case.mjs'), 'export default ' + cases.toString() + ';\n');
     writeFileSync(join(project, 'tests/run-canvas.mjs'), runner);
@@ -93,7 +93,7 @@ test('页面能打开，根目录显示内置模块与样本成员', () => withC
   const data = await call('/api/project');
   if (!data.levels[data.root.id]) throw Error('根目录应作为一层');
   const count = data.levels[data.root.id].members.length;
-  if (count !== 6) throw Error('成员数应为 6（框架反馈 + AI 示例 + 两个检查模块 + 两个样本），实际 ' + count);
+  if (count !== 7) throw Error('成员数应为 7（框架反馈 + AI 示例 + 三个检查模块 + 两个样本），实际 ' + count);
 }));
 
 test('能读到模块配套文件，读不到模块外', () => withCanvas('doc', async ({ call }) => {
@@ -383,4 +383,18 @@ test('批量删除节点同时清除连线与布局，正式节点保留',()=>wi
    links:[{from:{module:'$self',port:'text'},to:{module:'$self',port:'result'},info:'直接交付'}],positions:{}});
  if(s.error)throw Error(s.error);
  readProject(project);
+}));
+
+test('新草稿保留隐藏代码和资料，排除本地环境配置',()=>withCanvas('hidden-code',async({formal,open,request})=>{
+ const {writeFileSync,readFileSync,mkdirSync,existsSync}=await import('node:fs');
+ mkdirSync(formal+'/modules/a/.parts');
+ writeFileSync(formal+'/modules/a/.parts/helper.mjs',"export const value='隐藏依赖';");
+ writeFileSync(formal+'/modules/a/.prompt.md','隐藏资料');
+ writeFileSync(formal+'/.env','LOCAL_SETTING=value');
+ const draft=await open('含隐藏依赖');
+ if(readFileSync(draft.path+'/modules/a/.parts/helper.mjs','utf8')!=="export const value='隐藏依赖';")throw Error('隐藏代码未复制');
+ if(readFileSync(draft.path+'/modules/a/.prompt.md','utf8')!=='隐藏资料')throw Error('隐藏资料未复制');
+ if(existsSync(draft.path+'/.env'))throw Error('本地配置不应复制');
+ const snapshot=await request('/api/project',null,draft.id,draft.token);
+ if(snapshot.error)throw Error(snapshot.error);
 }));

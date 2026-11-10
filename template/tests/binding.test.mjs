@@ -39,7 +39,7 @@ const updateMeta = (root,id,change) => {
   const meta = JSON.parse(readFileSync(path,'utf8')); change(meta); json(path,meta);
 };
 
-for (const checkerId of ['project_consistency', 'prompt_readability']) {
+for (const checkerId of ['project_consistency', 'prompt_readability', 'project_overall']) {
   test(`模板检查模块 ${checkerId} 可单独接入 AI，不参与根项目业务调度`, async () => {
     const root = fileURLToPath(new URL('../', import.meta.url));
     const moduleDir = join(root, 'modules', checkerId);
@@ -264,4 +264,42 @@ test('正式删除清除目录与连线，不再执行被删本体，去掉布�
     assert.equal((await runProject(root,input)).outputs.result,'相同材料A');
     assert.equal(readFileSync(calls,'utf8'),'B','正式运行不能再次调用被删本体');
   } finally { server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); }
+}));
+
+test('默认模板仅调度反馈，待配置示例仍可独立展示', async () => {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const called = [];
+  const result = await runProject(root, {feedback:'受控输入'}, {executeAI:({id,values})=>{
+    called.push(id); return {result:values.feedback+'已处理'};
+  }});
+  assert.deepEqual(called,['framework_feedback']);
+  assert.equal(result.outputs.result,'受控输入已处理');
+  assert.ok(readProject(root).children.some(n=>n.isCombo && n.meta.status==='pending'));
+});
+
+test('隐藏依赖变化使旧计划失效，运行中变化阻断下游',()=>fixture(async root=>{
+  const dir=join(root,'modules/a');
+  mkdirSync(join(dir,'.parts'));
+  writeFileSync(join(dir,'.parts/value.mjs'),"export const suffix='旧';");
+  writeFileSync(join(dir,'run.mjs'),"import {suffix} from './.parts/value.mjs'; export const run=({text})=>({text:text+suffix});");
+  const old=executionPlan(root);
+  assert.equal((await runProject(root,{text:'输入'})).outputs.result,'输入旧B');
+  writeFileSync(join(dir,'.parts/value.mjs'),"export const suffix='新';");
+  await assert.rejects(runProject(root,{text:'输入'},{expectedVersion:old.version}),/已变化/);
+  assert.equal((await runProject(root,{text:'输入'})).outputs.result,'输入新B');
+  const called=[];
+  await assert.rejects(runProject(root,{text:'输入'},{executeProgram:({id,values})=>{
+    called.push(id);writeFileSync(join(dir,'.parts/value.mjs'),"export const suffix='运行中改动';");return values;
+  }}),/执行期间正式项目已变化/);
+  assert.deepEqual(called,['a']);
+}));
+
+test('版本库、草稿和本地配置不影响执行版本',()=>fixture(async root=>{
+  const old=executionPlan(root).version;
+  for(const name of ['.git','.canvas-drafts','.venv']) {
+    mkdirSync(join(root,name));writeFileSync(join(root,name,'state'),'变化');
+  }
+  writeFileSync(join(root,'.env'),'LOCAL_SETTING=value');
+  writeFileSync(join(root,'.env.local'),'LOCAL_SETTING=other');
+  assert.equal(executionPlan(root).version,old);
 }));

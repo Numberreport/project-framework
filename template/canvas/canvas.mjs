@@ -10,7 +10,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, cpSync,
 import { join, dirname, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
-import { readProject, projectVersion } from '../structure.mjs';
+import { readProject, projectVersion, ignoredHiddenEntry } from '../structure.mjs';
 
 // 默认读取画布目录的上一级项目；createCanvas(某个目录) 可以指到别处，测试和复用都靠这个。
 let ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -617,10 +617,10 @@ export function createCanvas(rootDir = ROOT) {
     mkdirSync(path);
     try {
       for (const entry of readdirSync(formal,{withFileTypes:true})) {
-        if (entry.name.startsWith('.') || excluded.has(entry.name) || entry.isSymbolicLink()) continue;
+        if (ignoredHiddenEntry(entry.name) || excluded.has(entry.name) || entry.isSymbolicLink()) continue;
         cpSync(join(formal,entry.name),join(path,entry.name),{recursive:true,filter:source=>{
           const name=source.split(sep).at(-1);
-          return !name.startsWith('.') && !excluded.has(name) && !/\.(pem|key)$/i.test(name) && realpathSync(source)===source;
+          return !ignoredHiddenEntry(name) && !excluded.has(name) && !/\.(pem|key)$/i.test(name) && realpathSync(source)===source;
         }});
       }
       if (formalVersion() !== base || inProject(path,()=>projectVersion(loadTree())) !== base) throw Error('项目在复制期间发生变化，请重试');

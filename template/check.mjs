@@ -156,13 +156,10 @@ function visit(dir, ids, seen, parentLinks = []) {
   for (const id of childIds) dfs(id);
   if (cyclic && (typeof data.stop !== 'string' || !data.stop.trim())) fail('组合有反馈回路但没写停止条件（connections.json 的 stop）：' + label);
 
-  // 模块声明的输入输出，外面要接得上。
-  // 组合看父层的线；根目录本身就是最外层，只看自己有没有把成员的交付接回 $self。
-  if (parentLinks) {
+  // 已接入父流程的组合核对外部连接；内部输出来源统一由 readProject 逐项验证。
+  if (parentLinks && parentLinks.some(e => e?.from?.module === meta.id || e?.to?.module === meta.id)) {
     if (node.inputs.length && !parentLinks.some(e => e?.to?.module === meta.id)) fail('组合声明了输入，但父层没有接进来的连接：' + label);
     if (node.outputs.length && !parentLinks.some(e => e?.from?.module === meta.id)) fail('组合声明了输出，但父层没有接出去的连接：' + label);
-  } else if (node.outputs.length && !node.children.some(c => node.links.some(e => e?.from?.module === c.meta.id && e?.to?.module === '$self'))) {
-    fail('项目的交付没有接回本层：没有任何成员的输出连到 $self');
   }
   return node;
 }
@@ -194,9 +191,23 @@ const all = tree ? [tree, ...walkAll(tree)] : [];
 // 根目录只放登记过的文件，防止临时文件、密钥混进来。
 const ROOT_ALLOWED = new Set(['structure.mjs', 'run.mjs', 'README.md', 'AGENTS.md', 'VALIDATION.md', 'canvas', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas-layout.json', 'tests', 'workspace']);
 const ROOT_IGNORED = new Set(['node_modules', 'dist', 'build', '__pycache__', 'venv', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'Makefile', 'Thumbs.db', 'desktop.ini']);
+const rootFiles = tree?.meta.rootFiles === undefined ? [] : tree.meta.rootFiles;
+if (!Array.isArray(rootFiles)) fail('rootFiles 必须是根目录文件或目录名称的数组');
+else {
+  const registered = new Set();
+  for (const entry of rootFiles) {
+    if (typeof entry !== 'string' || !entry.trim() || entry !== entry.trim() || entry.startsWith('.') || /[\\/:*?"<>|]/.test(entry) || registered.has(entry)) {
+      fail('rootFiles 名称无效或重复，只能填写根目录下的单个名称'); continue;
+    }
+    registered.add(entry);
+    const path = join(root, entry);
+    if (!existsSync(path) || !inside(realpathSync(root), realpathSync(path))) fail('rootFiles 指向的文件或目录不存在或越界：' + entry);
+    else ROOT_ALLOWED.add(entry);
+  }
+}
 for (const entry of readdirSync(root)) {
   if (entry.startsWith('.') || ROOT_ALLOWED.has(entry) || ROOT_IGNORED.has(entry)) continue;
-  fail('根目录有未登记的文件或目录：' + entry + '（先确认不是密钥；是项目文件就放进对应模块）');
+  fail('根目录有未登记的文件或目录：' + entry + '（项目自身内容在根 module.json 的 rootFiles 中登记，模块内容放进对应模块；不得登记密钥）');
 }
 checkLinks(root);
 

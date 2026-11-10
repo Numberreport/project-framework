@@ -37,8 +37,8 @@
       "height": 997
     },
     "node_8625bea3e733": {
-      "x": 684,
-      "y": 769
+      "x": 1700,
+      "y": 800
     },
     "io_cce73eb3d85a49e18a071f63d5c94dda": {
       "x": -191,
@@ -49,16 +49,20 @@
       "y": 755
     },
     "io_f5f783d30d1e4d2c8d775121ea068bce": {
-      "x": 1214,
-      "y": 763
+      "x": 2120,
+      "y": 800
     },
     "project_consistency": {
       "x": 124,
-      "y": 1230
+      "y": 1900
     },
     "prompt_readability": {
       "x": 684,
-      "y": 1230
+      "y": 1900
+    },
+    "project_overall": {
+      "x": 124,
+      "y": 2220
     }
   },
   "combo_2cdba77fc61b442cb79f9ca78acc1843": {

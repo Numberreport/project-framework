@@ -48,7 +48,7 @@ function fixture(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-check-'));
   const project = join(dir, 'project');
   try {
-    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || ['framework_feedback', 'ai_example', 'project_consistency', 'prompt_readability'].includes(basename(path))) });
+    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || ['framework_feedback', 'ai_example', 'project_consistency', 'prompt_readability', 'project_overall'].includes(basename(path))) });
     seed(project);
     fn(project);
   } finally {
@@ -233,4 +233,48 @@ test('implementation 不能越过模块目录', () => fixture(p => {
   symlinkSync(join(p, 'modules/b'), join(p, leaf, 'outside'), 'junction');
   edit(p, leaf + '/module.json', d => d.implementation = 'outside/run.mjs');
   bad(p, /implementation 指向的文件不存在或越界/);
+}));
+
+test('根项目登记页面与资料目录后可通过，仍拒绝未登记文件',()=>fixture(p=>{
+  writeFileSync(join(p,'index.html'),'<!doctype html><title>项目</title>');
+  mkdirSync(join(p,'assets'));
+  writeFileSync(join(p,'assets/info.txt'),'项目资料');
+  bad(p,/未登记的文件或目录：index\.html/);
+  edit(p,'module.json',m=>m.rootFiles=['index.html','assets']);
+  assert.equal(run(p).code,0);
+  writeFileSync(join(p,'unexpected.txt'),'临时文件');
+  bad(p,/未登记的文件或目录：unexpected\.txt/);
+}));
+
+for(const value of [null,'index.html',[' index.html '],['../outside'],['assets/file'],['*'],['.env'],['index.html','index.html'],['missing.html']]) {
+  test('根文件登记拒绝无效或缺失项 '+JSON.stringify(value),()=>fixture(p=>{
+    writeFileSync(join(p,'index.html'),'页面');
+    edit(p,'module.json',m=>m.rootFiles=value);
+    bad(p,/rootFiles/);
+  }));
+}
+
+test('根文件登记拒绝目录联接越界',()=>fixture(p=>{
+  const outside=join(dirname(p),'outside');mkdirSync(outside);
+  symlinkSync(outside,join(p,'assets'),'junction');
+  edit(p,'module.json',m=>m.rootFiles=['assets']);
+  bad(p,/rootFiles.*越界/);
+}));
+
+test('未接入父流程的组合可独立保留并通过检查',()=>fixture(p=>{
+  const dir=join(p,'modules/standalone');mkdirSync(join(dir,'modules'),{recursive:true});
+  writeFileSync(join(dir,'module.json'),JSON.stringify({id:'standalone',name:'独立组合',status:'ready',template:{id:'project-framework',version:'3.0.0'}}));
+  writeFileSync(join(dir,'README.md'),ROOT_README);
+  writeFileSync(join(dir,'VALIDATION.md'),VALIDATION);
+  writeFileSync(join(dir,'connections.json'),JSON.stringify({connections:[{from:{module:'$self',port:'text'},to:{module:'$self',port:'result'},info:'直接交付'}]}));
+  assert.equal(run(p).code,0);
+}));
+
+
+test('根组合可直接交付输入，断开输出来源仍拒绝',()=>fixture(p=>{
+  edit(p,'connections.json',d=>d.connections=[{from:{module:'$self',port:'text'},to:{module:'$self',port:'result'},info:'直接交付材料'}]);
+  const direct=run(p);
+  assert.equal(direct.code,0,direct.text);
+  edit(p,'connections.json',d=>d.connections=[]);
+  bad(p,/输出没有来源/);
 }));

@@ -1,0 +1,8 @@
+{
+  "id": "project_overall",
+  "name": "项目整体检查",
+  "template": { "id": "project-framework", "version": "3.0.0" },
+  "status": "ready",
+  "processor": "ai",
+  "implementation": "implementation/prompt.md"
+}

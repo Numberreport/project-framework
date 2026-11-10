@@ -110,6 +110,9 @@ export function validateConnections(tree, { allowIncompleteOutputs = false } = {
   }
 }
 
+// 隐藏代码同样参与正式版本；只排除明确的本地配置与运行目录。
+export const ignoredHiddenEntry = name => ['.git', '.canvas-drafts', '.draft.json', '.venv'].includes(name) || name === '.env' || name.startsWith('.env.');
+
 // 包含模块本体，代码或提示词改变也会使旧执行计划失效；运行数据和画布布局不参与。
 export function projectVersion(tree) {
   const hash = createHash('sha256'), base = realpathSync(tree.dir), seen = new Set();
@@ -118,7 +121,7 @@ export function projectVersion(tree) {
     if (!inside(base, real) || seen.has(real)) throw Error('项目文件路径越界或重复：' + dir);
     seen.add(real);
     for (const entry of readdirSync(dir, {withFileTypes:true}).sort((a,b) => a.name.localeCompare(b.name))) {
-      if (entry.name.startsWith('.') || ['workspace','node_modules','__pycache__','dist','build','canvas-layout.json'].includes(entry.name)) continue;
+      if (ignoredHiddenEntry(entry.name) || ['workspace','node_modules','__pycache__','dist','build','canvas-layout.json'].includes(entry.name)) continue;
       const path = join(dir, entry.name);
       if (!inside(base, realpathSync(path))) throw Error('项目文件路径越界：' + path);
       if (statSync(path).isDirectory()) walk(path);
