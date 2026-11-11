@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { join, relative, isAbsolute, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readProject } from './structure.mjs';
+import { readProject, ignoredHiddenEntry } from './structure.mjs';
 
 const VERSION = '3.0.0';
 const REQUIRED = ['README.md', 'VALIDATION.md', 'module.json'];
@@ -21,9 +21,26 @@ const read = (path) => readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
 const readJson = (path) => { try { return JSON.parse(read(path)); } catch { fail('JSON 无效或缺失：' + relative(root, path)); return null; } };
 const walkAll = (node) => node ? node.children.flatMap(child => [child, ...walkAll(child)]) : [];
 
-// 按 README 的二级标题切开，取指定小节；标题必须写，缺了报错。
+// 代码示例和注释中的标题不参与说明书分节；保留位置以读取原文。
+function headingText(text) {
+  let fence = null;
+  return text.replace(/<!--[\s\S]*?-->/g, value => value.replace(/[^\r\n]/g, ' ')).split('\n').map(line => {
+    const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && !mark[2].trim()) fence = null;
+      return line.replace(/[^\r]/g, ' ');
+    }
+    if (mark) { fence = mark[1]; return line.replace(/[^\r]/g, ' '); }
+    return line;
+  }).join('\n');
+}
+const headingsOf = text => [...headingText(text).matchAll(/^##[ \t]+([^\r\n]*?)[ \t]*\r?$/gm)];
 function sectionOf(text, title) {
-  return new RegExp('^##[ \\t]*' + title + '[ \\t]*\\r?\\n([^]*?)(?=^## |$(?![^]))', 'm').exec(text)?.[1] ?? null;
+  const headings = headingsOf(text);
+  const index = headings.findIndex(match => match[1] === title);
+  if (index < 0) return null;
+  const match = headings[index];
+  return text.slice(match.index + match[0].length, headings[index + 1]?.index ?? text.length);
 }
 function section(text, title, label) {
   const body = sectionOf(text, title);
@@ -80,7 +97,16 @@ function visit(dir, ids, seen, parentLinks = []) {
   const docPath = join(dir, doc);
   const readable = existsSync(docPath) && inside(real, realpathSync(docPath));
   const docText = readable ? read(docPath) : '';
-  if (readable) for (const title of SECTIONS) section(docText, title, label + '/' + doc);
+  if (readable) {
+    const headings = headingsOf(docText);
+    for (const title of SECTIONS) {
+      const body = section(docText, title, label + '/' + doc);
+      if (headings.filter(match => match[1] === title).length > 1) fail('README 固定标题重复「' + title + '」：' + label);
+      if (body !== null && !body.replace(/<!--[\s\S]*?-->/g, '').trim()) fail('README 章节为空「' + title + '」：' + label);
+    }
+    const portCount = ['输入', '输出'].reduce((count, title) => count + blocksOf(sectionOf(docText, title) || '').length, 0);
+    if (blocksOf(docText).length !== portCount) fail('接口定义只能写在 README 的「输入」「输出」中：' + label);
+  }
 
   // implementation、verify 可选；填了就必须指向本模块内的真实文件。
   for (const field of ['implementation', 'verify']) {
@@ -209,9 +235,29 @@ for (const entry of readdirSync(root)) {
   if (entry.startsWith('.') || ROOT_ALLOWED.has(entry) || ROOT_IGNORED.has(entry)) continue;
   fail('根目录有未登记的文件或目录：' + entry + '（项目自身内容在根 module.json 的 rootFiles 中登记，模块内容放进对应模块；不得登记密钥）');
 }
+// 对正式文件做补充扫描，找出没有被 modules/ 层级收录的模块。
+// 运行数据、依赖和构建目录不作为项目模块检查。
+const SCAN_IGNORED = new Set(['workspace', 'node_modules', 'dist', 'build', '__pycache__', 'venv', '.venv']);
+const formalDirs = new Set(all.filter(n => !n.virtual).map(n => realpathSync(n.dir)));
+function checkModulePlacement(dir) {
+  for (const item of readdirSync(dir, { withFileTypes: true })) {
+    if (ignoredHiddenEntry(item.name) || SCAN_IGNORED.has(item.name)) continue;
+    if (item.isSymbolicLink()) { fail('模块层级扫描无法核对符号链接：' + relative(root, join(dir, item.name))); continue; }
+    const path = join(dir, item.name);
+    if (!item.isDirectory()) continue;
+    if (existsSync(join(path, 'module.json')) && !formalDirs.has(realpathSync(path))) {
+      fail('模块未纳入正式 modules/ 层级：' + relative(root, path));
+    }
+    checkModulePlacement(path);
+  }
+}
+checkModulePlacement(root);
 checkLinks(root);
 
-if (!existsSync(join(root, 'AGENTS.md'))) fail('AGENTS.md 缺失');
+for (const file of ['AGENTS.md', 'structure.mjs', 'run.mjs']) {
+  const path = join(root, file);
+  if (!existsSync(path) || !statSync(path).isFile() || !inside(realpathSync(root), realpathSync(path)) || !read(path).trim()) fail('框架文件缺失、为空或越界：' + file);
+}
 
 if (process.argv.includes('--tree')) for (const n of all) console.log((n.label === '.' ? '根目录' : n.label) + ' [' + n.meta.id + '] ' + n.meta.name);
 
@@ -275,4 +321,5 @@ if (errors.length) { for (const e of errors) console.error(e); process.exit(1); 
 
 const pending = all.filter(n => n.meta.status === 'pending').length;
 console.log('结构检查通过：' + all.length + ' 个模块' + (pending ? '；其中 ' + pending + ' 个待配置，不得运行' : ''));
+console.log('检查范围：正式模块层级、模板版本、配套文件、说明章节、接口、连接及本地链接；未验证模块分工、内容归属和实际调用是否符合框架，须另行检查。');
 if (process.argv.includes('--verify')) console.log('维护验收：脚本通过 ' + ran + ' 项，跳过 ' + skipped + ' 项；仅已执行且通过的脚本有验收结果，不代表业务内容合格。');

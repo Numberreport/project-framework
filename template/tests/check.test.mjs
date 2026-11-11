@@ -278,3 +278,55 @@ test('根组合可直接交付输入，断开输出来源仍拒绝',()=>fixture(
   edit(p,'connections.json',d=>d.connections=[]);
   bad(p,/输出没有来源/);
 }));
+
+
+test('根目录登记目录也不能隐藏未纳入层级的模块', () => fixture(p => {
+  mkdirSync(join(p, 'extras', 'hidden'), { recursive: true });
+  writeFileSync(join(p, 'extras', 'hidden', 'module.json'), '{}');
+  edit(p, 'module.json', d => d.rootFiles = ['extras']);
+  bad(p, /模块未纳入正式 modules/);
+}));
+
+test('运行数据中的模块副本不参与正式层级检查', () => fixture(p => {
+  mkdirSync(join(p, 'workspace', 'sample'), { recursive: true });
+  writeFileSync(join(p, 'workspace', 'sample', 'module.json'), '{}');
+  const r = run(p);
+  assert.equal(r.code, 0, r.text);
+}));
+
+test('固定章节不能重复或留空', () => fixture(p => {
+  writeFileSync(join(p, leaf, 'README.md'), README + '\n## 职责\n\n重复。\n');
+  bad(p, /固定标题重复/);
+  writeFileSync(join(p, leaf, 'README.md'), README.replace('处理一段文字，交给下一个模块。', ''));
+  bad(p, /章节为空/);
+}));
+
+test('接口不能写在处理流程中', () => fixture(p => {
+  writeFileSync(join(p, leaf, 'README.md'), README.replace('1. 读取输入', '```interfaces\n[]\n```\n\n1. 读取输入'));
+  bad(p, /接口定义只能写在/);
+}));
+
+test('框架执行文件缺失不能通过', () => fixture(p => {
+  unlinkSync(join(p, 'run.mjs'));
+  bad(p, /框架文件缺失.*run.mjs/);
+}));
+
+
+test('制表符固定标题重复也会被发现', () => fixture(p => {
+  writeFileSync(join(p, leaf, 'README.md'), README + '\n##\t职责\n\n重复。\n');
+  bad(p, /固定标题重复/);
+}));
+
+test('代码示例中的标题不会填充空章节或造成重复', () => fixture(p => {
+  writeFileSync(join(p, leaf, 'README.md'), README + '\n~~~md\n## 职责\n示例\n~~~\n');
+  const r = run(p);
+  assert.equal(r.code, 0, r.text);
+  writeFileSync(join(p, leaf, 'README.md'), README.replace('处理一段文字，交给下一个模块。', '<!-- 注释 -->'));
+  bad(p, /章节为空/);
+}));
+
+test('隐藏目录里的模块登记也不能漏查', () => fixture(p => {
+  mkdirSync(join(p, '.custom', 'hidden'), { recursive: true });
+  writeFileSync(join(p, '.custom', 'hidden', 'module.json'), '{}');
+  bad(p, /模块未纳入正式 modules/);
+}));
