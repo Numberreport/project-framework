@@ -144,7 +144,7 @@ export async function runProject(rootDir, inputs, options = {}) {
     const tick = () => { if (++steps > maxSteps) throw Error('超过允许的执行次数，已停止'); };
     const combination = async (node, data, path) => {
       const members = participants(node), queues = new Map(), outputs = {}, ranSources = new Set();
-      let stopped = false, invocation = 0, routeCount = 0, stopCount = 0;
+      let stopped = false, cursor = 0, invocation = 0, routeCount = 0, stopCount = 0;
       const queue = (id,port) => { const key = JSON.stringify([id,port]); if (!queues.has(key)) queues.set(key,[]); return queues.get(key); };
       const route = async (id, values) => {
         for (const edge of node.links.filter(e => e.from.module === id)) {
@@ -168,7 +168,14 @@ export async function runProject(rootDir, inputs, options = {}) {
       for (const io of node.ioNodes.filter(n => n.type === 'input' && own(ioInputs,n.id))) await route(io.id,{value:ioInputs[io.id]});
       while (true) {
         unchanged();
-        const next = members.find(n => n.inputs.length ? n.inputs.every(p => queue(n.id,p.name).length) : !ranSources.has(n.id));
+        let next;
+        // 从上次成员之后继续找，避免反馈回路一直抢占已经就绪的其他成员。
+        for (let offset = 0; offset < members.length; offset++) {
+          const index = (cursor + offset) % members.length, candidate = members[index];
+          if (candidate.inputs.length ? candidate.inputs.every(p => queue(candidate.id,p.name).length) : !ranSources.has(candidate.id)) {
+            next = candidate; cursor = (index + 1) % members.length; break;
+          }
+        }
         if (!next) break;
         tick(); ranSources.add(next.id);
         const values = Object.fromEntries(next.inputs.map(p => [p.name,queue(next.id,p.name).shift()]));

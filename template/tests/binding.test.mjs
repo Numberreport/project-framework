@@ -168,6 +168,42 @@ test('反馈按正式回路重跑，停止条件和次数限制均生效',()=>fi
   await assert.rejects(runProject(root,{text:''},{shouldStop:()=>false,maxSteps:3}),/超过允许的执行次数/);
 }));
 
+test('反馈同时交给检查分支，交换模块标识仍能及时检查并停止',async()=>{
+  for (const [producer,checker] of [['a','b'],['b','a']]) await fixture(async root=>{
+    json(join(root,'connections.json'),{
+      connections:[edge('$self',producer),edge(producer,producer),edge(producer,checker),edge(checker,'$self','text','result')],
+      stop:'检查结果达到两轮生成的目标',
+    });
+    const checked = [];
+    const result=await runProject(root,{text:''},{maxSteps:4,
+      executeProgram:({id,values})=>{
+        if (id===producer) return {text:values.text+'G'};
+        checked.push(values.text); return {text:values.text+'C'};
+      },
+      shouldStop:({outputs})=>outputs.result==='GGC',
+    });
+    assert.deepEqual(checked,['G','GG'],'检查分支按输入到达顺序处理每轮材料');
+    assert.equal(result.outputs.result,'GGC');
+    assert.equal(result.steps,4);
+  });
+});
+
+test('反馈与无输入成员并存时，无输入成员每次进入组合只调用一次',()=>fixture(async root=>{
+  writeFileSync(join(root,'modules/b/README.md'),doc([],['text']));
+  json(join(root,'connections.json'),{
+    connections:[edge('$self','a'),edge('a','a'),edge('b','$self','text','result')],
+    stop:'完成三轮处理后停止',
+  });
+  const calls=[];
+  const result=await runProject(root,{text:''},{maxSteps:4,
+    executeProgram:({id,values})=>{calls.push(id);return id==='b'?{text:'once'}:values;},
+    shouldStop:({steps})=>steps===4,
+  });
+  assert.equal(result.outputs.result,'once');
+  assert.equal(calls.filter(id=>id==='b').length,1);
+  assert.equal(calls.filter(id=>id==='a').length,3);
+}));
+
 test('组合按内部连接执行，拒绝组合另设入口绕过成员',()=>fixture(async root=>{
   const combo=join(root,'modules/c'); mkdirSync(combo,{recursive:true});
   json(join(combo,'module.json'),{id:'c',name:'组合',status:'ready'});

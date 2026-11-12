@@ -136,16 +136,43 @@ export function validateConnections(tree, { allowIncompleteOutputs = false } = {
 // 隐藏代码同样参与正式版本；只排除明确的本地配置与运行目录。
 export const ignoredHiddenEntry = name => ['.git', '.canvas-drafts', '.draft.json', '.venv'].includes(name) || name === '.env' || name.startsWith('.env.');
 
+// 版本检查和项目复制共用的正式文件范围；调用方仍负责核对真实路径是否越界。
+export function projectFileFilter(tree) {
+  const excluded = name => ['.git', '.canvas-drafts', '.draft.json', 'credentials.json', 'secrets.json'].includes(name) ||
+    name === '.env' || name.startsWith('.env.') || /\.(pem|key)$/i.test(name);
+  const ignored = name => ignoredHiddenEntry(name) || ['workspace','node_modules','__pycache__','dist','build','venv','canvas-layout.json'].includes(name);
+  const protectedRoots = new Set();
+  // 登记入口所在的排除目录已是本体，连同其中的依赖参与版本，不能只散列入口文件。
+  for (const node of flatten(tree)) {
+    for (const target of [node.dir, ...['implementation','verify'].filter(key => node.meta[key]).map(key => join(node.dir,node.meta[key]))]) {
+      let path = tree.dir;
+      for (const name of relative(tree.dir,target).split(/[\\/]/).filter(Boolean)) {
+        path = join(path,name);
+        if (ignored(name)) { protectedRoots.add(path); break; }
+      }
+    }
+  }
+  const protectedPaths = [...protectedRoots];
+  const rootFiles = Array.isArray(tree.meta.rootFiles) ? tree.meta.rootFiles : [];
+  return path => {
+    const parts = relative(tree.dir,path).split(/[\\/]/);
+    if (parts.some(excluded)) return false;
+    if (['runs', 'outputs'].includes(parts[0]) && !rootFiles.includes(parts[0])) return false;
+    return protectedPaths.some(root => inside(root,path)) || parts.every(name => !ignored(name));
+  };
+}
+
 // 包含模块本体，代码或提示词改变也会使旧执行计划失效；运行数据和画布布局不参与。
 export function projectVersion(tree) {
   const hash = createHash('sha256'), base = realpathSync(tree.dir), seen = new Set();
+  const include = projectFileFilter(tree);
   const walk = dir => {
     const real = realpathSync(dir);
     if (!inside(base, real) || seen.has(real)) throw Error('项目文件路径越界或重复：' + dir);
     seen.add(real);
     for (const entry of readdirSync(dir, {withFileTypes:true}).sort((a,b) => a.name.localeCompare(b.name))) {
-      if (ignoredHiddenEntry(entry.name) || ['workspace','node_modules','__pycache__','dist','build','canvas-layout.json'].includes(entry.name)) continue;
       const path = join(dir, entry.name);
+      if (!include(path)) continue;
       if (!inside(base, realpathSync(path))) throw Error('项目文件路径越界：' + path);
       if (statSync(path).isDirectory()) walk(path);
       else { hash.update(JSON.stringify(relative(base,path))); hash.update(readFileSync(path)); }

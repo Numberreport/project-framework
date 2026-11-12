@@ -10,7 +10,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, cpSync,
 import { join, dirname, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
-import { readProject, projectVersion, ignoredHiddenEntry, headingsOf, validateGuidance } from '../structure.mjs';
+import { readProject, projectVersion, projectFileFilter, headingsOf, sectionOf, validateGuidance } from '../structure.mjs';
 
 // 默认读取画布目录的上一级项目；createCanvas(某个目录) 可以指到别处，测试和复用都靠这个。
 let ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -69,8 +69,7 @@ function readLayout() {
 // 根目录和模块的说明都在各自的 README.md。
 function duties(node) {
   const file = 'README.md';
-  const body = readText(join(node.dir, file)).match(/^##[ \t]*职责[ \t]*\r?\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1].trim() || '';
-  return body;
+  return sectionOf(readText(join(node.dir, file)), '职责')?.trim() || '';
 }
 
 // 发给页面的一层数据。
@@ -90,7 +89,8 @@ function viewOf(combo) {
 
 // 只算不写。预览和确认用同一份计划。
 export function planPack(tree, { parentId, memberIds, id, name, fileRevisions }) {
-  if (fileRevisions) assertRevisions(fileRevisions);
+  if (fileRevisions) inProject(tree.dir, () => assertRevisions(fileRevisions));
+  const projectPath = path => relative(tree.dir, path).split(sep).join('/') || '.';
   const parent = findNode(tree, parentId);
   if (!parent || !parent.isCombo) throw Error('只能在组合里打包');
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id || '')) throw Error('组合标识只能用字母、数字、下划线和短横线');
@@ -107,6 +107,9 @@ export function planPack(tree, { parentId, memberIds, id, name, fileRevisions })
   if (parent.meta.guidance && (parent.meta.guidance.mode === 'all' || parent.meta.guidance.checkpoints.some(id=>ids.has(id)))) throw Error('所选节点涉及确认设置，请先调整所属组合的流程引导设置再打包');
   const isInner = (e) => ids.has(e.from.module) && ids.has(e.to.module);
   const touching = (e) => ids.has(e.from.module) || ids.has(e.to.module);
+  if (parent.links.some(e => touching(e) && e.when !== undefined)) {
+    throw Error('包含条件连线的选区暂不支持自动组成组合，需先明确组合接口与条件流程；项目文件未修改');
+  }
   const crossing = parent.links.filter(e => touching(e) && !isInner(e));
 
   const inputs = [], outputs = [], boundary = [], names = { input: new Map(), output: new Map() };
@@ -130,9 +133,9 @@ export function planPack(tree, { parentId, memberIds, id, name, fileRevisions })
 
   const targetDir = join(parent.dir, 'modules', id);
   return {
-    parentId: parent.id, parentDir: parent.dir, targetDir, id, name: String(name).trim(), stop: parent.stop,
+    rootDir: tree.dir, parentId: parent.id, parentDir: parent.dir, targetDir, id, name: String(name).trim(), stop: parent.stop,
     ioNodes: pickedIO,
-    members: picked.map(c => ({ id: c.id, name: c.name, from: rel(join(parent.dir, 'modules', c.id)), to: rel(join(targetDir, 'modules', c.id)) })),
+    members: picked.map(c => ({ id: c.id, name: c.name, from: projectPath(c.dir), to: projectPath(join(targetDir, 'modules', c.id)) })),
     inner: [...parent.links.filter(isInner), ...boundary], outer, inputs, outputs,
     revisions: { parent: hash(readText(join(parent.dir, 'connections.json'))) },
   };
@@ -140,7 +143,7 @@ export function planPack(tree, { parentId, memberIds, id, name, fileRevisions })
 
 export function describe(plan) {
   return {
-    combo: plan.name + '（' + plan.id + '）', location: rel(plan.targetDir),
+    combo: plan.name + '（' + plan.id + '）', location: relative(plan.rootDir, plan.targetDir).split(sep).join('/'),
     ioNodes: plan.ioNodes || [],
     move: plan.members.map(m => ({ name: m.name, id: m.id, from: m.from, to: m.to })),
     inputs: plan.inputs, outputs: plan.outputs,
@@ -148,57 +151,55 @@ export function describe(plan) {
   };
 }
 
-// 打包后，被移动模块里的 Markdown 相对链接会断——不管它指向模块里面还是外面。
-// moves 是 [(旧绝对路径, 新绝对路径)]。从「文档的新位置」出发重新算，结果才准。
-function rewriteMarkdown(moves) {
+// 在移动前计算全文档的引用变化，同时覆盖移出、移入及未移动文件中的反向链接。
+function planMarkdownChanges(tree, moves) {
+  const root = tree.dir;
   const changes = [];
   const relocated = (path) => {
     const hit = moves.find(([from]) => inside(from, path));
     return hit ? join(hit[1], relative(hit[0], path)) : null;
   };
-  for (const [oldDir, newDir] of moves) {
-    for (const path of markdownFiles(newDir)) {
-      const text = readFileSync(path, 'utf8');
-      // 这份文档搬家前在哪：把新路径里属于本模块的前缀换回旧路径。
-      const oldPath = join(oldDir, relative(newDir, path));
-      let touched = false;
-      const next = text.replace(/(\[[^\]]*\]\()([^)#\s]+)(#[^)]*)?(\))/g, (all, open, link, anchor = '', close) => {
-        if (/^[a-z][a-z0-9+.-]*:/i.test(link) || link.startsWith('/')) return all;
-        const absolute = join(dirname(oldPath), link);
-        // 目标落在被移动的模块里，就跟着一起搬；落在外面（项目根、别的模块），位置不变。
-        const target = relocated(absolute) || absolute;
-        if (!existsSync(join(ROOT, rel(target))) && !existsSync(target)) return all;
-        const fixed = relative(dirname(path), target).split(sep).join('/');
-        if (fixed === link) return all;
-        touched = true;
-        changes.push({ file: rel(path), from: link, to: fixed });
-        return open + fixed + anchor + close;
-      });
-      if (touched) writeFileSync(path, next);
-    }
+  for (const originalPath of markdownFiles(tree)) {
+    const path = relocated(originalPath) || originalPath;
+    const before = readFileSync(originalPath, 'utf8'), links = [];
+    const after = before.replace(/(\[[^\]]*\]\()(<[^>]+>|[^)\s]+)(\))/g, (all, open, destination, close) => {
+      const angled = destination.startsWith('<');
+      const raw = angled ? destination.slice(1, -1) : destination;
+      const split = raw.indexOf('#'), link = split < 0 ? raw : raw.slice(0, split), anchor = split < 0 ? '' : raw.slice(split);
+      if (!link || /^[a-z][a-z0-9+.-]*:/i.test(link) || link.startsWith('/')) return all;
+      const originalTarget = join(dirname(originalPath), link);
+      if (!existsSync(originalTarget) || !inside(root, realpathSync(originalTarget))) return all;
+      const target = relocated(originalTarget) || originalTarget;
+      const fixed = relative(dirname(path), target).split(sep).join('/');
+      if (fixed === link) return all;
+      links.push({ file: relative(root, path).split(sep).join('/'), from: link, to: fixed });
+      return open + (angled ? '<' : '') + fixed + anchor + (angled ? '>' : '') + close;
+    });
+    if (links.length) changes.push({ originalPath, path, before, after, links });
   }
   return changes;
 }
 
-// 模块里所有 Markdown，跳过运行记录和成果。
-function markdownFiles(dir) {
+// 项目里的 Markdown，跳过运行记录、草稿、依赖及链接目录。
+function markdownFiles(tree) {
+  const include = projectFileFilter(tree);
   const found = [];
   const walk = (current) => {
     for (const item of readdirSync(current, { withFileTypes: true })) {
-      if (item.name.startsWith('.') || ['node_modules', 'workspace'].includes(item.name)) continue;
       const path = join(current, item.name);
+      if (item.isSymbolicLink() || item.name === '.canvas-trash' || !include(path)) continue;
       if (item.isDirectory()) walk(path);
       else if (item.name.endsWith('.md')) found.push(path);
     }
   };
-  walk(dir);
+  walk(tree.dir);
   return found;
 }
 
 const writeAtomic = (path, content) => { const tmp = path + '.tmp-' + process.pid; writeFileSync(tmp, content, {flag:'wx'}); try { renameSync(tmp, path); } catch (error) { rmSync(tmp,{force:true}); throw error; } };
 
 // 真正写盘。任何一步失败就把已做的改动退回去。
-export function applyPack(tree, plan) {
+export function applyPack(tree, plan, { write = writeAtomic } = {}) {
   const parentFile = join(plan.parentDir, 'connections.json');
   if (hash(readText(parentFile)) !== plan.revisions.parent) throw Error('connections.json 已变化，请重新预览');
 
@@ -211,8 +212,11 @@ export function applyPack(tree, plan) {
     if (!newParentLinks.some(x => sameEnds(x, e))) newParentLinks.push(e);
   }
 
-  const moves = plan.members.map(m => [join(ROOT, m.from), join(ROOT, m.to)]);
+  const moves = plan.members.map(m => [join(tree.dir, m.from), join(tree.dir, m.to)]);
   if (existsSync(plan.targetDir)) throw Error('目标目录已存在：' + rel(plan.targetDir));
+  const markdown = planMarkdownChanges(tree, moves);
+  const writtenMarkdown = [];
+  let parentWritten = false, removingMembers = false;
 
   try {
     // 1. 先复制成员到新位置，再删旧的；复制失败时原目录还在。
@@ -222,18 +226,28 @@ export function applyPack(tree, plan) {
     }
     // 2. 新组合的说明书与内部连接。
     mkdirSync(join(plan.targetDir, 'modules'), { recursive: true });
-    writeCombo(plan);
-    writeAtomic(join(plan.targetDir, 'connections.json'), JSON.stringify({ connections: plan.inner, ...(plan.ioNodes?.length ? { ioNodes: plan.ioNodes } : {}), ...(plan.stop ? { stop: plan.stop } : {}) }, null, 2) + '\n');
+    for (const [name, content] of Object.entries(combinationFiles(plan))) write(join(plan.targetDir, name), content);
+    write(join(plan.targetDir, 'connections.json'), JSON.stringify({ connections: plan.inner, ...(plan.ioNodes?.length ? { ioNodes: plan.ioNodes } : {}), ...(plan.stop ? { stop: plan.stop } : {}) }, null, 2) + '\n');
     // 3. 父层连接换成经过新组合。
-    writeAtomic(parentFile, JSON.stringify({ ...parentData, ...(parentData.ioNodes ? { ioNodes:parentData.ioNodes.filter(n => !ids.has(n.id)) } : {}), connections: newParentLinks }, null, 2) + '\n');
-    // 4. 修 Markdown 链接。必须在删旧目录之前做，链接要对照旧位置才解析得出来。
-    const links = rewriteMarkdown(moves);
+    write(parentFile, JSON.stringify({ ...parentData, ...(parentData.ioNodes ? { ioNodes:parentData.ioNodes.filter(n => !ids.has(n.id)) } : {}), connections: newParentLinks }, null, 2) + '\n');
+    parentWritten = true;
+    // 4. 更新内外文档引用；失败时未移动文档也须恢复。
+    for (const change of markdown) {
+      write(change.path, change.after);
+      writtenMarkdown.push(change);
+    }
     // 5. 删掉旧目录。
+    removingMembers = true;
     for (const [from] of moves) rmSync(from, { recursive: true, force: true });
-    return { links };
+    return { links: markdown.flatMap(change => change.links) };
   } catch (e) {
-    writeAtomic(parentFile, parentBefore);
-    for (const [from, to] of moves) if (!existsSync(from) && existsSync(to)) cpSync(to, from, { recursive: true });
+    if (parentWritten) write(parentFile, parentBefore);
+    if (removingMembers) {
+      for (const [from, to] of moves) if (existsSync(to)) cpSync(to, from, { recursive: true });
+    }
+    for (const change of writtenMarkdown) {
+      if (change.path === change.originalPath || removingMembers) write(change.originalPath, change.before);
+    }
     rmSync(plan.targetDir, { recursive: true, force: true });
     throw e;
   }
@@ -244,7 +258,7 @@ const sameEnds = (a, b) => e_from_key(a) === e_from_key(b) && a.to.module + '.' 
 
 // 新组合的说明书和检查标准。打包能确定的是成员和连接；职责和检查标准留给人补。
 // 新组合保持 pending；补齐说明和检查标准并自查通过后，才能改为 ready。
-function writeCombo(plan) {
+export function combinationFiles(plan) {
   const portBlock = (ports) => '```interfaces\n' + JSON.stringify(ports, null, 2) + '\n```';
   const memberList = plan.members.map(m => '- ' + m.name + '（' + m.id + '）').join('\n');
   const flow = plan.inner.map(e => '- ' + e.from.module + '.' + e.from.port + ' → ' + e.to.module + '.' + e.to.port).join('\n') || '- 暂无内部连接';
@@ -260,7 +274,7 @@ function writeCombo(plan) {
     'VALIDATION.md': '# 检查标准\n\n组合整体的交付怎样算合格，请结合成员各自的 VALIDATION.md 补充。\n\n' +
       '完成后把 module.json 的状态从 pending 改成 ready。\n',
   };
-  for (const [name, content] of Object.entries(files)) writeAtomic(join(plan.targetDir, name), content);
+  return files;
 }
 
 // ---- 保存连接 ---------------------------------------------------------------
@@ -594,6 +608,18 @@ function inProject(root, operation) {
   try { return operation(); } finally { ROOT = previous; }
 }
 
+// 草稿与正式版本采用相同文件范围，另保留布局；凭据与链接文件始终不复制。
+export function copyProjectFiles(tree, target) {
+  const include = projectFileFilter(tree);
+  const allowed = source => (include(source) || source === join(tree.dir, LAYOUT)) && realpathSync(source) === source;
+  mkdirSync(target, { recursive: true });
+  for (const entry of readdirSync(tree.dir, { withFileTypes: true })) {
+    const source = join(tree.dir, entry.name);
+    if (entry.isSymbolicLink() || !allowed(source)) continue;
+    cpSync(source, join(target, entry.name), { recursive: true, filter: allowed });
+  }
+}
+
 export function createCanvas(rootDir = ROOT) {
   const formal = realpathSync(rootDir);
   const drafts = join(formal, '.canvas-drafts');
@@ -623,20 +649,13 @@ export function createCanvas(rootDir = ROOT) {
   };
   const copyDraft = name => {
     const id = randomBytes(12).toString('hex');
-    const base = formalVersion();
+    const tree = inProject(formal, loadTree), base = projectVersion(tree);
     mkdirSync(drafts,{recursive:true});
     if (realpathSync(drafts) !== drafts) throw Error('草稿目录不可用');
     const path = join(drafts,id);
-    const excluded = new Set(['workspace','node_modules','__pycache__','runs','outputs','dist','build','credentials.json','secrets.json']);
     mkdirSync(path);
     try {
-      for (const entry of readdirSync(formal,{withFileTypes:true})) {
-        if (ignoredHiddenEntry(entry.name) || excluded.has(entry.name) || entry.isSymbolicLink()) continue;
-        cpSync(join(formal,entry.name),join(path,entry.name),{recursive:true,filter:source=>{
-          const name=source.split(sep).at(-1);
-          return !ignoredHiddenEntry(name) && !excluded.has(name) && !/\.(pem|key)$/i.test(name) && realpathSync(source)===source;
-        }});
-      }
+      copyProjectFiles(tree, path);
       if (formalVersion() !== base || inProject(path,()=>projectVersion(loadTree())) !== base) throw Error('项目在复制期间发生变化，请重试');
       inProject(path,addCombinationSources);
       writeMetadata(path,{name,base,savedAt:new Date().toISOString()});
