@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'n
 import { join, relative, isAbsolute, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readProject, ignoredHiddenEntry } from './structure.mjs';
+import { readProject, ignoredHiddenEntry, headingsOf, sectionOf } from './structure.mjs';
 
 const VERSION = '3.0.0';
 const REQUIRED = ['README.md', 'VALIDATION.md', 'module.json'];
@@ -21,27 +21,6 @@ const read = (path) => readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
 const readJson = (path) => { try { return JSON.parse(read(path)); } catch { fail('JSON 无效或缺失：' + relative(root, path)); return null; } };
 const walkAll = (node) => node ? node.children.flatMap(child => [child, ...walkAll(child)]) : [];
 
-// 代码示例和注释中的标题不参与说明书分节；保留位置以读取原文。
-function headingText(text) {
-  let fence = null;
-  return text.replace(/<!--[\s\S]*?-->/g, value => value.replace(/[^\r\n]/g, ' ')).split('\n').map(line => {
-    const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (fence) {
-      if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && !mark[2].trim()) fence = null;
-      return line.replace(/[^\r]/g, ' ');
-    }
-    if (mark) { fence = mark[1]; return line.replace(/[^\r]/g, ' '); }
-    return line;
-  }).join('\n');
-}
-const headingsOf = text => [...headingText(text).matchAll(/^##[ \t]+([^\r\n]*?)[ \t]*\r?$/gm)];
-function sectionOf(text, title) {
-  const headings = headingsOf(text);
-  const index = headings.findIndex(match => match[1] === title);
-  if (index < 0) return null;
-  const match = headings[index];
-  return text.slice(match.index + match[0].length, headings[index + 1]?.index ?? text.length);
-}
 function section(text, title, label) {
   const body = sectionOf(text, title);
   if (body === null) fail('README 缺标题「' + title + '」：' + label);
@@ -215,7 +194,7 @@ try { readProject(root); } catch (error) { fail(error.message); }
 const all = tree ? [tree, ...walkAll(tree)] : [];
 
 // 根目录只放登记过的文件，防止临时文件、密钥混进来。
-const ROOT_ALLOWED = new Set(['structure.mjs', 'run.mjs', 'README.md', 'AGENTS.md', 'VALIDATION.md', 'canvas', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas-layout.json', 'tests', 'workspace']);
+const ROOT_ALLOWED = new Set(['structure.mjs', 'run.mjs', 'workflow.mjs', 'README.md', 'AGENTS.md', 'VALIDATION.md', 'canvas', 'module.json', 'connections.json', 'modules', 'check.mjs', 'canvas-layout.json', 'tests', 'workspace']);
 const ROOT_IGNORED = new Set(['node_modules', 'dist', 'build', '__pycache__', 'venv', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'Makefile', 'Thumbs.db', 'desktop.ini']);
 const rootFiles = tree?.meta.rootFiles === undefined ? [] : tree.meta.rootFiles;
 if (!Array.isArray(rootFiles)) fail('rootFiles 必须是根目录文件或目录名称的数组');
@@ -254,7 +233,7 @@ function checkModulePlacement(dir) {
 checkModulePlacement(root);
 checkLinks(root);
 
-for (const file of ['AGENTS.md', 'structure.mjs', 'run.mjs']) {
+for (const file of ['AGENTS.md', 'structure.mjs', 'run.mjs', 'workflow.mjs']) {
   const path = join(root, file);
   if (!existsSync(path) || !statSync(path).isFile() || !inside(realpathSync(root), realpathSync(path)) || !read(path).trim()) fail('框架文件缺失、为空或越界：' + file);
 }

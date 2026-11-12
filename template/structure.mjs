@@ -8,8 +8,30 @@ const read = path => readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(value);
 export const flatten = node => [node, ...node.children.flatMap(flatten)];
 
+// 代码示例和注释中的标题不参与说明书分节；保留位置以读取原文。
+function headingText(text) {
+  let fence = null;
+  return text.replace(/<!--[\s\S]*?-->/g, value => value.replace(/[^\r\n]/g, ' ')).split('\n').map(line => {
+    const mark = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line.replace(/\r$/, ''));
+    if (fence) {
+      if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && !mark[2].trim()) fence = null;
+      return line.replace(/[^\r]/g, ' ');
+    }
+    if (mark) { fence = mark[1]; return line.replace(/[^\r]/g, ' '); }
+    return line;
+  }).join('\n');
+}
+export const headingsOf = text => [...headingText(text).matchAll(/^##[ \t]+([^\r\n]*?)[ \t]*\r?$/gm)];
+export function sectionOf(text, title) {
+  const headings = headingsOf(text);
+  const index = headings.findIndex(match => match[1] === title);
+  if (index < 0) return null;
+  const match = headings[index];
+  return text.slice(match.index + match[0].length, headings[index + 1]?.index ?? text.length);
+}
+
 export function readPorts(text, title, label = '') {
-  const section = new RegExp('^##[ \\t]*' + title + '[ \\t]*\\r?\\n([^]*?)(?=^## |$(?![^]))', 'm').exec(text)?.[1] || '';
+  const section = sectionOf(text, title) || '';
   const blocks = [...section.matchAll(/```interfaces[ \t]*\r?\n([^]*?)\r?\n```/g)];
   if (blocks.length > 1) throw Error('接口定义只能有一块：' + label + '/' + title);
   if (!blocks.length) return [];
@@ -80,6 +102,7 @@ export function readProject(rootDir, { allowIncompleteOutputs = false } = {}) {
   };
   const tree = load(root);
   validateConnections(tree, { allowIncompleteOutputs });
+  for (const node of flatten(tree)) validateGuidance(node);
   Object.defineProperty(tree,'assertCurrent',{value:() => {
     for (const [path,text] of files) if (read(path) !== text) throw Error('读取期间项目结构已变化，请重试');
     for (const [dir,value] of directories) if (shape(dir) !== value) throw Error('读取期间模块目录已变化，请重试');
@@ -131,4 +154,17 @@ export function projectVersion(tree) {
   walk(tree.dir);
   tree.assertCurrent();
   return hash.digest('hex');
+}
+
+// 引导只引用正式成员，不提供第二套顺序。
+export function validateGuidance(node) {
+  const g = node.meta.guidance;
+  if (g === undefined) return;
+  if (!node.isCombo || !g || typeof g !== 'object' || Array.isArray(g) ||
+      Object.keys(g).some(k => !['mode','checkpoints'].includes(k)) ||
+      !['none','key','all'].includes(g.mode) || !Array.isArray(g.checkpoints) ||
+      new Set(g.checkpoints).size !== g.checkpoints.length ||
+      g.checkpoints.some(id => !node.children.some(c => c.id === id) || !node.links.some(e => e.from.module === id || e.to.module === id))) {
+    throw Error('流程引导设置无效：须在组合登记确认方式和已连接的本层成员，不能另设顺序：'+node.label);
+  }
 }

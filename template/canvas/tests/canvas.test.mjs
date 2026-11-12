@@ -74,7 +74,7 @@ function withCanvas(name, cases) {
   const dir = mkdtempSync(join(tmpdir(), 'framework-canvas-'));
   const project = join(dir, 'project');
   try {
-    cpSync(source, project, { recursive: true, filter: path => !['runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || ['framework_feedback', 'ai_example', 'project_consistency', 'prompt_readability', 'project_overall'].includes(basename(path))) });
+    cpSync(source, project, { recursive: true, filter: path => !['workspace', 'runs', 'outputs', 'node_modules', 'tests', '.git', '.canvas-drafts'].includes(basename(path)) && (dirname(path) !== join(source, 'modules') || ['framework_feedback', 'ai_example', 'project_consistency', 'prompt_readability', 'project_overall', 'workflow_guidance'].includes(basename(path))) });
     seed(project);
     mkdirSync(join(project, 'tests'), { recursive: true }); writeFileSync(join(project, 'tests/case.mjs'), 'export default ' + cases.toString() + ';\n');
     writeFileSync(join(project, 'tests/run-canvas.mjs'), runner);
@@ -93,7 +93,7 @@ test('页面能打开，根目录显示内置模块与样本成员', () => withC
   const data = await call('/api/project');
   if (!data.levels[data.root.id]) throw Error('根目录应作为一层');
   const count = data.levels[data.root.id].members.length;
-  if (count !== 7) throw Error('成员数应为 7（框架反馈 + AI 示例 + 三个检查模块 + 两个样本），实际 ' + count);
+  if (count !== 8) throw Error('成员数应为 8（框架反馈 + AI 示例 + 三个检查模块 + 流程引导 + 两个样本），实际 ' + count);
 }));
 
 test('能读到模块配套文件，读不到模块外', () => withCanvas('doc', async ({ call }) => {
@@ -397,4 +397,19 @@ test('新草稿保留隐藏代码和资料，排除本地环境配置',()=>withC
  if(existsSync(draft.path+'/.env'))throw Error('本地配置不应复制');
  const snapshot=await request('/api/project',null,draft.id,draft.token);
  if(snapshot.error)throw Error(snapshot.error);
+}));
+
+
+test('流程引导设置落在所属组合，标记可重建，非法成员拒绝，删除时清除引用',()=>withCanvas('guidance',async({call,project})=>{
+  let s=await call('/api/project');const levelId=s.root.id;
+  const set=async guidance=>call('/api/settings',{action:'ports',levelId,nodeId:levelId,inputs:s.levels[levelId].inputs,outputs:s.levels[levelId].outputs,guidance,fileRevisions:s.fileRevisions});
+  s=await set({mode:'key',checkpoints:['a']});if(s.error)throw Error(s.error);
+  if(!s.levels[levelId].members.find(n=>n.id==='a').confirmation||s.levels[levelId].members.find(n=>n.id==='b').confirmation)throw Error('确认标记错误');
+  const {readFileSync}=await import('node:fs');
+  if(JSON.parse(readFileSync(project+'/module.json','utf8')).guidance.checkpoints[0]!=='a')throw Error('设置未保存到组合');
+  const bad=await set({mode:'key',checkpoints:['unknown']});if(!bad.error)throw Error('无效成员被接受');
+  s=await call('/api/project');if(!s.levels[levelId].members.find(n=>n.id==='a').confirmation)throw Error('失败后未恢复');
+  const pack=await call('/api/pack-preview',{parentId:levelId,memberIds:['a','b'],id:'packed',name:'打包',fileRevisions:s.fileRevisions});if(!pack.error)throw Error('打包没有保护确认位置');
+  s=await call('/api/settings',{action:'deleteNodes',nodeIds:['a'],levelId,fileRevisions:s.fileRevisions});if(s.error)throw Error(s.error);
+  if(s.levels[levelId].guidance.checkpoints.length)throw Error('删除后遗留确认引用');
 }));

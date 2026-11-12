@@ -1,0 +1,11 @@
+{
+  "id": "workflow_guidance",
+  "name": "流程引导",
+  "template": {
+    "id": "project-framework",
+    "version": "3.0.0"
+  },
+  "status": "ready",
+  "processor": "ai",
+  "implementation": "implementation/prompt.md"
+}

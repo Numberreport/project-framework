@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { readProject, projectVersion } from './structure.mjs';
+import { openWorkflow, WorkflowPause } from './workflow.mjs';
 
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 function contract(value, ports, label) {
@@ -36,7 +37,7 @@ function cyclic(node) {
 export function executionPlan(rootDir) {
   const tree = readProject(rootDir);
   const describe = node => ({ id:node.id, name:node.name, path:node.label, status:node.meta.status,
-    implementation:node.meta.implementation || null, inputs:node.inputs, outputs:node.outputs,
+    implementation:node.meta.implementation || null, guidance:node.meta.guidance || null, inputs:node.inputs, outputs:node.outputs,
     ...(node.isCombo ? {connections:node.links, ioNodes:node.ioNodes, stop:node.stop, members:participants(node).map(describe)} : {}) });
   return {version:projectVersion(tree), project:describe(tree)};
 }
@@ -105,74 +106,101 @@ export async function runProject(rootDir, inputs, options = {}) {
   prepare(tree);
   for (const id of Object.keys(ioInputs)) if (!ioIds.has(id)) throw Error('未定义的独立输入节点：' + id);
   for (const id of ioIds) if (!own(ioInputs,id) || ioInputs[id] === undefined) throw Error('缺少独立输入节点的材料：' + id);
-  let steps = 0;
-  const ioOutputs = {};
-  const bounded = async action => {
-    let timer;
-    try { return await Promise.race([Promise.resolve().then(action),new Promise((_,reject) => { timer = setTimeout(() => reject(Error('执行方式响应超时')),timeoutMs); })]); }
-    finally { clearTimeout(timer); }
-  };
-  const execute = async (node, data) => {
-    unchanged(); contract(data,node.inputs,node.label + ' 输入');
-    if (node.isCombo) return combination(node,data);
-    if (!prepared.has(node.id)) throw Error('模块未经执行检查：' + node.id);
-    const entry = join(node.dir,node.meta.implementation);
-    const context = {id:node.id, directory:node.dir, entry, version, inputs:structuredClone(node.inputs), outputs:structuredClone(node.outputs)};
-    const ai = node.meta.processor === 'ai' || (!node.meta.processor && /\.md$/i.test(entry));
-    const result = ai
-      ? await bounded(() => executeAI({ ...context, prompt:readFileSync(entry,'utf8'), values:data }))
-      : typeof executeProgram === 'function'
-        ? await bounded(() => executeProgram({...context, values:data}))
-        : await nativeProgram(entry,data,context,timeoutMs);
-    unchanged(); contract(result,node.outputs,node.label + ' 输出');
-    return result;
-  };
-  const tick = () => { if (++steps > maxSteps) throw Error('超过允许的执行次数，已停止'); };
-  const combination = async (node, data) => {
-    const members = participants(node), queues = new Map(), outputs = {}, ranSources = new Set();
-    let stopped = false;
-    const queue = (id,port) => { const key = JSON.stringify([id,port]); if (!queues.has(key)) queues.set(key,[]); return queues.get(key); };
-    const route = async (id, values) => {
-      for (const edge of node.links.filter(e => e.from.module === id)) {
-        if (!own(values,edge.from.port)) continue;
-        if (edge.when !== undefined) {
-          const allowed = await bounded(() => evaluateWhen({condition:edge.when, edge:structuredClone(edge), value:structuredClone(values[edge.from.port]), levelId:node.id, version}));
-          unchanged();
-          if (typeof allowed !== 'boolean') throw Error('条件判断必须返回 true 或 false');
-          if (!allowed) continue;
-        }
-        const value = structuredClone(values[edge.from.port]);
-        if (edge.to.module === '$self') outputs[edge.to.port] = value;
-        else {
-          const io = node.ioNodes.find(n => n.id === edge.to.module);
-          if (io) ioOutputs[io.id] = value;
-          else queue(edge.to.module,edge.to.port).push(value);
-        }
-      }
+  const modeFor = node => options.confirmationMode ?? node.meta.guidance?.mode ?? 'none';
+  const needsGuidance = node => node.isCombo && (modeFor(node) !== 'none' || participants(node).some(needsGuidance));
+  const guided = needsGuidance(tree);
+  if (guided && !options.taskDirectory) throw Error('启用确认须提供 taskDirectory 保存暂停状态');
+  const workflow = openWorkflow(rootDir,version,inputs,ioInputs,options);
+  try {
+    const event = (key,data,action) => workflow ? workflow.event(key,data,action) : action();
+    let steps = 0;
+    const ioOutputs = {};
+    const bounded = async action => {
+      let timer;
+      try { return await Promise.race([Promise.resolve().then(action),new Promise((_,reject) => { timer = setTimeout(() => reject(Error('执行方式响应超时')),timeoutMs); })]); }
+      finally { clearTimeout(timer); }
     };
-    await route('$self',data);
-    for (const io of node.ioNodes.filter(n => n.type === 'input' && own(ioInputs,n.id))) await route(io.id,{value:ioInputs[io.id]});
-    while (true) {
-      unchanged();
-      const next = members.find(n => n.inputs.length ? n.inputs.every(p => queue(n.id,p.name).length) : !ranSources.has(n.id));
-      if (!next) break;
-      tick(); ranSources.add(next.id);
-      const values = Object.fromEntries(next.inputs.map(p => [p.name,queue(next.id,p.name).shift()]));
-      await route(next.id,await execute(next,values));
-      if (node.stop && typeof shouldStop === 'function') {
-        const stop = await bounded(() => shouldStop({condition:node.stop, levelId:node.id, steps, outputs:structuredClone(outputs), version}));
+    const execute = async (node, data, path) => {
+      unchanged(); contract(data,node.inputs,node.label + ' 输入');
+      if (node.isCombo) return combination(node,data,path);
+      if (!prepared.has(node.id)) throw Error('模块未经执行检查：' + node.id);
+      const entry = join(node.dir,node.meta.implementation);
+      const context = {id:node.id, directory:node.dir, entry, version, inputs:structuredClone(node.inputs), outputs:structuredClone(node.outputs)};
+      const ai = node.meta.processor === 'ai' || (!node.meta.processor && /\.md$/i.test(entry));
+      const result = await event('execute:'+path, data, async () => {
+        // 本体可原地处理自己的输入副本；确认与恢复始终保留调用前的材料。
+        const values = workflow ? structuredClone(data) : data;
+        const value = ai
+          ? await bounded(() => executeAI({ ...context, prompt:readFileSync(entry,'utf8'), values }))
+          : typeof executeProgram === 'function'
+            ? await bounded(() => executeProgram({...context, values}))
+            : await nativeProgram(entry,values,context,timeoutMs);
+        unchanged(); contract(value,node.outputs,node.label + ' 输出');
+        return value;
+      });
+      unchanged(); contract(result,node.outputs,node.label + ' 输出');
+      return result;
+    };
+    const tick = () => { if (++steps > maxSteps) throw Error('超过允许的执行次数，已停止'); };
+    const combination = async (node, data, path) => {
+      const members = participants(node), queues = new Map(), outputs = {}, ranSources = new Set();
+      let stopped = false, invocation = 0, routeCount = 0, stopCount = 0;
+      const queue = (id,port) => { const key = JSON.stringify([id,port]); if (!queues.has(key)) queues.set(key,[]); return queues.get(key); };
+      const route = async (id, values) => {
+        for (const edge of node.links.filter(e => e.from.module === id)) {
+          if (!own(values,edge.from.port)) continue;
+          if (edge.when !== undefined) {
+            const allowed = await event('when:'+path+':'+routeCount++, {edge,value:values[edge.from.port]}, () => bounded(() => evaluateWhen({condition:edge.when, edge:structuredClone(edge), value:structuredClone(values[edge.from.port]), levelId:node.id, version})));
+            unchanged();
+            if (typeof allowed !== 'boolean') throw Error('条件判断必须返回 true 或 false');
+            if (!allowed) continue;
+          }
+          const value = structuredClone(values[edge.from.port]);
+          if (edge.to.module === '$self') outputs[edge.to.port] = value;
+          else {
+            const io = node.ioNodes.find(n => n.id === edge.to.module);
+            if (io) ioOutputs[io.id] = value;
+            else queue(edge.to.module,edge.to.port).push(value);
+          }
+        }
+      };
+      await route('$self',data);
+      for (const io of node.ioNodes.filter(n => n.type === 'input' && own(ioInputs,n.id))) await route(io.id,{value:ioInputs[io.id]});
+      while (true) {
         unchanged();
-        if (typeof stop !== 'boolean') throw Error('停止判断必须返回 true 或 false');
-        if (stop) { stopped = true; break; }
+        const next = members.find(n => n.inputs.length ? n.inputs.every(p => queue(n.id,p.name).length) : !ranSources.has(n.id));
+        if (!next) break;
+        tick(); ranSources.add(next.id);
+        const values = Object.fromEntries(next.inputs.map(p => [p.name,queue(next.id,p.name).shift()]));
+        const childPath = path+'/'+next.id+':'+invocation++;
+        const start = workflow?.position();
+        const actual = workflow ? workflow.values(childPath,values) : values;
+        const result = await execute(next,actual,childPath);
+        const mode = modeFor(node);
+        if (workflow && (mode === 'all' || (mode === 'key' && node.meta.guidance?.checkpoints.includes(next.id)))) {
+          workflow.gate({path:childPath, start, module:next.id, name:next.name, inputNames:next.inputs.map(p=>p.name), inputs:actual, outputs:result,
+            next:node.links.filter(e=>e.from.module===next.id).map(e=>({module:e.to.module,condition:e.when || null}))});
+        }
+        await route(next.id,result);
+        if (node.stop && typeof shouldStop === 'function') {
+          const stop = await event('stop:'+path+':'+stopCount++, {steps,outputs}, () => bounded(() => shouldStop({condition:node.stop, levelId:node.id, steps, outputs:structuredClone(outputs), version})));
+          unchanged();
+          if (typeof stop !== 'boolean') throw Error('停止判断必须返回 true 或 false');
+          if (stop) { stopped = true; break; }
+        }
       }
-    }
-    if (!stopped && [...queues.values()].some(q => q.length)) throw Error('部分输入尚未凑齐，不能交付：' + node.label);
-    contract(outputs,node.outputs,node.label + ' 输出');
-    return outputs;
-  };
-  const outputs = await execute(tree,inputs);
-  unchanged();
-  return {outputs, ioOutputs, steps, version};
+      if (!stopped && [...queues.values()].some(q => q.length)) throw Error('部分输入尚未凑齐，不能交付：' + node.label);
+      contract(outputs,node.outputs,node.label + ' 输出');
+      return outputs;
+    };
+    const outputs = await execute(tree,inputs,tree.id);
+    unchanged();
+    const result = {outputs, ioOutputs, steps, version};
+    return workflow ? workflow.finish(result) : result;
+  } catch (error) {
+    if (error instanceof WorkflowPause) return workflow.paused();
+    throw error;
+  } finally { workflow?.close(); }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

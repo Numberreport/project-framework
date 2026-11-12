@@ -519,7 +519,7 @@ function render() {
     el.addEventListener('mouseenter', () => highlightNodeEdges(node.id));
     el.addEventListener('mouseleave', () => highlightNodeEdges(null));
     el.innerHTML =
-      '<div class="head"><button data-settings aria-label="' + esc(node.name) + '设置" class="gear">⚙</button>' + esc(node.name) +
+      '<div class="head"><button data-settings aria-label="' + esc(node.name) + '设置" class="gear">⚙</button>' + esc(node.name) + (node.confirmation ? '<small title="成员交付后等待用户确认"> · 需确认</small>' : '') +
         '<small>' + (node.boundary ? (node.type === 'input' ? '组合输入' : '组合输出') : node.type ? '独立' + (node.type === 'input' ? '输入' : '输出') : esc(node.id)) + (node.isCombo ? ' · 双击进入' : node.type ? '' : ' · 双击看文件') + '</small></div>' +
       (node.description ? '<div class="io-description">' + esc(node.description) + '</div>' : '') + '<div class="ports"><div>' + (node.type ? '' : '<small>输入</small>') +
         (node.inputs || []).map(p => '<div class="port"><span class="dot in" data-dot="in" data-id="' + esc(node.boundary ? '$self' : node.id) + '" data-port="' + esc(p.name) + '" title="' + esc(p.description) + '"></span>' + esc(node.type && !node.boundary ? node.name : p.name) + '</div>').join('') +
@@ -1145,7 +1145,7 @@ let editing = null, editingPorts = null, contextPoint = null;
 async function settings(node) {
   if (!editable) return;
   if (!await flushCanvas()) return;
-  editing = { ...node, description:node.description || node.responsibility || node.summary || '' }; editingPorts = structuredClone({ inputs: node.inputs || [], outputs: node.outputs || [] });
+  editing = { ...node, guidance:structuredClone(node.guidance || {mode:'none',checkpoints:[]}), description:node.description || node.responsibility || node.summary || '' }; editingPorts = structuredClone({ inputs: node.inputs || [], outputs: node.outputs || [] });
   for (const list of Object.values(editingPorts)) list.forEach(p => p.original = p.name);
   $('settingsTitle').textContent = node.name + '设置';
   if (node.type) {
@@ -1171,6 +1171,13 @@ function nextPortName(side) {
 }
 function renderPortEditor() {
   $('settingsBody').innerHTML = '<label>名称<input id="moduleName" value="' + esc(editing.name) + '"></label><label>职责说明<textarea id="moduleDescription">' + esc(editing.description) + '</textarea></label><p>接口标识只能用字母、数字、下划线、短横线。每项须填写说明。</p>' + ['inputs','outputs'].map(side => '<h4>' + (side === 'inputs' ? '输入' : '输出') + '</h4><div class="port-edit port-columns"><span>接口名称</span><span>' + (side === 'inputs' ? '接收什么材料' : '交付什么结果') + '</span><span aria-hidden="true">操作</span></div><div>' + editingPorts[side].map((p,i) => '<div class="port-edit"><input aria-label="接口标识" data-side="' + side + '" data-index="' + i + '" data-field="name" value="' + esc(p.name) + '"><input aria-label="接口说明" data-side="' + side + '" data-index="' + i + '" data-field="description" value="' + esc(p.description) + '"><button data-remove="' + side + ':' + i + '">删除</button></div>').join('') + '</div><button data-new="' + side + '">新增' + (side === 'inputs' ? '输入' : '输出') + '</button>').join('');
+  if (editing.isCombo) {
+    const level = state.data.levels[editing.id];
+    const members = (level?.members || []).filter(m=>level.links.some(e=>e.from.module===m.id || e.to.module===m.id));
+    $('settingsBody').insertAdjacentHTML('beforeend','<h4>流程引导</h4><label>本层确认方式<select id="guidanceMode">'+[['none','不额外确认'],['key','仅关键步骤确认'],['all','本层逐步确认']].map(([v,t])=>'<option value="'+v+'"'+(editing.guidance.mode===v?' selected':'')+'>'+t+'</option>').join('')+'</select></label><p>关键步骤（成员交付后确认，组合内部另行设置）：</p>'+members.map(m=>'<label style="display:block"><input style="width:auto" type="checkbox" data-guidance="'+esc(m.id)+'"'+(editing.guidance.checkpoints.includes(m.id)?' checked':'')+'> '+esc(m.name)+'</label>').join(''));
+    $('guidanceMode').onchange = e => editing.guidance.mode = e.target.value;
+    $('settingsBody').querySelectorAll('[data-guidance]').forEach(el=>el.onchange=()=>{editing.guidance.checkpoints=[...$('settingsBody').querySelectorAll('[data-guidance]:checked')].map(e=>e.dataset.guidance);});
+  }
   $('moduleName').oninput = e => { editing.name = e.target.value; };
   $('moduleDescription').oninput = e => { editing.description = e.target.value; };
   $('settingsBody').querySelectorAll('input[data-side]').forEach(el => el.oninput = () => { editingPorts[el.dataset.side][el.dataset.index][el.dataset.field] = el.value; });
@@ -1228,7 +1235,7 @@ $('settingsSave').onclick = () => {
     if ((internal || external) && deleted[direction].includes(end.port)) affected.push(level.name + '：' + edge.info);
   }
   if (affected.length && !confirm('以下连线将删除：\n' + [...new Set(affected)].join('\n'))) return;
-  structural({ action:'ports',nodeId:editing.id,name:editing.name,description:editing.description,removals:deleted,inputs:editingPorts.inputs.map(({name,description}) => ({name,description})),outputs:editingPorts.outputs.map(({name,description}) => ({name,description})),renames });
+  structural({ action:'ports',...(editing.isCombo ? {guidance:editing.guidance} : {}),nodeId:editing.id,name:editing.name,description:editing.description,removals:deleted,inputs:editingPorts.inputs.map(({name,description}) => ({name,description})),outputs:editingPorts.outputs.map(({name,description}) => ({name,description})),renames });
 };
 $('stage').addEventListener('contextmenu', e => {
   if (!editable || e.target.closest('.node, .edge, button')) return;

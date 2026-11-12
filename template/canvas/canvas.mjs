@@ -10,7 +10,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, cpSync,
 import { join, dirname, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createHash } from 'node:crypto';
-import { readProject, projectVersion, ignoredHiddenEntry } from '../structure.mjs';
+import { readProject, projectVersion, ignoredHiddenEntry, headingsOf, validateGuidance } from '../structure.mjs';
 
 // 默认读取画布目录的上一级项目；createCanvas(某个目录) 可以指到别处，测试和复用都靠这个。
 let ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -79,10 +79,10 @@ function viewOf(combo) {
   for (const file of DOCS) if (existsSync(join(combo.dir, file))) documents[file] = readText(join(combo.dir, file));
   const responsibility = duties(combo);
   return {
-    id: combo.id, name: combo.name, label: combo.label, isCombo: combo.isCombo,
+    id: combo.id, name: combo.name, label: combo.label, isCombo: combo.isCombo, guidance:combo.meta.guidance || null,
     documents, responsibility, summary: responsibility.split(/\r?\n\s*\r?\n/)[0] || '',
     ioNodes: combo.ioNodes || [], inputs: combo.inputs, outputs: combo.outputs, links: combo.links, stop: combo.stop,
-    members: combo.children.map(c => ({ id: c.id, name: c.name, label: c.label, isCombo: c.isCombo, responsibility:duties(c), summary: duties(c).split(/\r?\n\s*\r?\n/)[0] || '', inputs: c.inputs, outputs: c.outputs })),
+    members: combo.children.map(c => ({ id: c.id, name: c.name, label: c.label, isCombo: c.isCombo, guidance:c.meta.guidance || null, confirmation:combo.links.some(e=>e.from.module===c.id || e.to.module===c.id) && (combo.meta.guidance?.mode === 'all' || (combo.meta.guidance?.mode === 'key' && combo.meta.guidance.checkpoints.includes(c.id))), responsibility:duties(c), summary: duties(c).split(/\r?\n\s*\r?\n/)[0] || '', inputs: c.inputs, outputs: c.outputs })),
   };
 }
 
@@ -104,6 +104,7 @@ export function planPack(tree, { parentId, memberIds, id, name, fileRevisions })
   if (flatten(tree).some(n => n.id === id)) throw Error('标识已被占用：' + id);
 
   const ids = new Set([...picked, ...pickedIO].map(c => c.id));
+  if (parent.meta.guidance && (parent.meta.guidance.mode === 'all' || parent.meta.guidance.checkpoints.some(id=>ids.has(id)))) throw Error('所选节点涉及确认设置，请先调整所属组合的流程引导设置再打包');
   const isInner = (e) => ids.has(e.from.module) && ids.has(e.to.module);
   const touching = (e) => ids.has(e.from.module) || ids.has(e.to.module);
   const crossing = parent.links.filter(e => touching(e) && !isInner(e));
@@ -255,7 +256,7 @@ function writeCombo(plan) {
       '## 输入\n\n' + list(plan.inputs, '本组合不接收外部输入。') + '\n\n' + portBlock(plan.inputs) + '\n\n' +
       '## 输出\n\n' + list(plan.outputs, '本组合不对外输出。') + '\n\n' + portBlock(plan.outputs) + '\n\n' +
       '## 处理流程\n\n按 connections.json 把输入交给成员，收集成员的交付后对外输出。\n\n内部连接：\n\n' + flow +
-      '\n\n## 没完成时\n',
+      '\n\n## 没完成时\n\n当前组合为待配置状态，不得运行。缺少职责、处理规则、连接或检查标准时停止并说明缺项；补齐并自检后再改为 ready。\n',
     'VALIDATION.md': '# 检查标准\n\n组合整体的交付怎样算合格，请结合成员各自的 VALIDATION.md 补充。\n\n' +
       '完成后把 module.json 的状态从 pending 改成 ready。\n',
   };
@@ -393,12 +394,18 @@ function validatePorts(ports) {
     seen.add(p.name);
   }
 }
-function replacePorts(text, title, ports) {
-  const re = new RegExp('(^##[ \t]*' + title + '[ \t]*\r?\n)([^]*?)(?=^## |$(?![^]))', 'm');
-  if (!re.test(text)) throw Error('README 缺少' + title + '小节');
-  return text.replace(re, (_, head, body) => {
+function replaceSection(text, title, replace) {
+  const headings = headingsOf(text), index = headings.findIndex(match => match[1] === title);
+  if (index < 0) throw Error('README 缺少' + title + '小节');
+  const start = headings[index].index + headings[index][0].length;
+  const end = headings[index + 1]?.index ?? text.length;
+  return text.slice(0, start) + replace(text.slice(start, end)) + text.slice(end);
+}
+export function replacePorts(text, title, ports) {
+  return replaceSection(text, title, body => {
     const block = '```interfaces\n' + JSON.stringify(ports, null, 2) + '\n```';
-    return head + (/```interfaces[^]*?```/.test(body) ? body.replace(/```interfaces[^]*?```/, () => block) : body.trimEnd() + '\n\n' + block + '\n\n');
+    const pattern = /```interfaces[ \t]*\r?\n[^]*?\r?\n```/;
+    return pattern.test(body) ? body.replace(pattern, () => block) : body.trimEnd() + '\n\n' + block + '\n\n';
   });
 }
 export function editStructure(data) {
@@ -427,6 +434,7 @@ export function editStructure(data) {
         moved.push([member.dir,target]);
       }
       transaction(new Map([
+        [join(owner.dir,'module.json'),JSON.stringify({...owner.meta,...(owner.meta.guidance ? {guidance:{...owner.meta.guidance,checkpoints:owner.meta.guidance.checkpoints.filter(id=>!ids.has(id))}} : {})},null,2)+'\n'],
         [join(owner.dir,'connections.json'),JSON.stringify(record,null,2)+'\n'],
         [join(ROOT,LAYOUT),JSON.stringify(layout,null,2)+'\n'],
       ]));
@@ -513,8 +521,14 @@ export function editStructure(data) {
       const path = join(n.dir,'README.md');
       let text = changes.get(path);
       text = text.replace(/^# [^\r\n]*/m, () => '# ' + data.name.trim());
-      text = text.replace(/(^##[ \t]*职责[ \t]*\r?\n)([^]*?)(?=^## |$(?![^]))/m, (_,head) => head + '\n' + data.description.trim() + '\n\n');
+      text = replaceSection(text, '职责', () => '\n\n' + data.description.trim() + '\n\n');
       changes.set(path,text);
+    }
+    if (data.guidance !== undefined) {
+      validateGuidance({...n,meta:{...n.meta,guidance:data.guidance}});
+      const path = join(n.dir,'module.json');
+      const meta = changes.has(path) ? JSON.parse(changes.get(path)) : n.meta;
+      changes.set(path,JSON.stringify({...meta,guidance:data.guidance},null,2)+'\n');
     }
     const remap = (end, side, self) => {
       if (end.module !== (self ? '$self' : n.id)) return;
