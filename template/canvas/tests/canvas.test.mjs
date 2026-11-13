@@ -123,6 +123,43 @@ test('保存连接、条件和节点位置', () => withCanvas('save', async ({ c
   if (!pos || pos.x !== 10 || pos.y !== 20) throw Error('位置没存');
 }));
 
+test('已有输入保留旧连线，添加第二个来源后按顺序处理两份材料', () => withCanvas('multiple-input-sources', async ({ call, formal, project }) => {
+  const assert = (await import('node:assert/strict')).default;
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { runProject } = await import('../run.mjs');
+  const formalFile = formal + '/connections.json';
+  const original = readFileSync(formalFile, 'utf8');
+  let state = await call('/api/project');
+  const levelId = state.root.id, sourceId = 'another_source';
+  state = await call('/api/settings', {
+    action: 'io', levelId, fileRevisions: state.fileRevisions,
+    node: { id: sourceId, type: 'input', name: '第二份材料', description: '传给同一输入' },
+  });
+  assert.ok(!state.error, state.error);
+  const second = { from: { module: sourceId, port: 'value' }, to: { module: 'a', port: 'text' }, info: '第二份材料' };
+  const links = [...state.levels[levelId].links, second];
+  const save = (snapshot, edges) => call('/api/save', {
+    levelId, revision: snapshot.revisions[levelId], fileRevisions: snapshot.fileRevisions, links: edges,
+  });
+  const saved = await save(state, links);
+  assert.ok(!saved.error, saved.error);
+  const refreshed = await call('/api/project');
+  assert.deepEqual(refreshed.levels[levelId].links, links);
+  assert.match((await save(refreshed, [...links, second])).error, /重复连线/);
+  assert.equal(readFileSync(formalFile, 'utf8'), original);
+  writeFileSync(formalFile, readFileSync(project + '/connections.json'));
+  const received = [];
+  const result = await runProject(formal, { text: '第一份' }, {
+    ioInputs: { [sourceId]: '第二份' },
+    executeAI: ({ id, values }) => {
+      if (id === 'a') received.push(values.text);
+      return values;
+    },
+  });
+  assert.deepEqual(received, ['第一份', '第二份']);
+  assert.deepEqual(result.outputs, { result: '第二份' });
+}));
+
 test('文件被别的操作改过时拒绝覆盖', () => withCanvas('conflict', async ({ call }) => {
   const before = await call('/api/project');
   const root = before.root.id;
@@ -297,7 +334,7 @@ test('一键创建自动标识，名称职责稍后设置并写回底层',()=>wi
  if(updated.name!=='材料整理'||updated.inputs.length!==1||!updated.responsibility.includes('关键条件'))throw Error('设置未同步');
  const meta=JSON.parse(readFileSync(project+'/modules/'+node.id+'/module.json'));if(meta.name!=='材料整理'||meta.status!=='pending')throw Error('登记表不一致');
 }));
-test('拖线创建节点同时保存位置和连线，端口失效时不创建',()=>withCanvas('create-connected',async({call})=>{
+test('拖线创建节点可补充已有输入的来源，端口失效时不创建',()=>withCanvas('create-connected',async({call})=>{
  let s=await call('/api/project');
  const levelId=s.root.id;
  const target=s.levels[levelId].members.find(n=>n.inputs.length);
@@ -306,14 +343,11 @@ test('拖线创建节点同时保存位置和连线，端口失效时不创建',
  const invalid=await create({module:target.id,port:'missing'});
  if(!invalid.error)throw Error('无效接口被接受');
  const endpoint={module:target.id,port:target.inputs[0].name};
- const occupied=await create(endpoint);
- if(!occupied.error?.includes('已有来源'))throw Error('允许重复输入来源');
- const links=s.levels[levelId].links.filter(e=>e.to.module!==endpoint.module||e.to.port!==endpoint.port);
- s=await call('/api/save',{levelId,revision:s.revisions[levelId],fileRevisions:s.fileRevisions,links});
- if(s.error)throw Error(s.error);
+ const links=s.levels[levelId].links;
  s=await create(endpoint);
  if(s.error)throw Error(s.error);
  if(s.layout[levelId].new_source.x!==500 || !s.levels[levelId].links.some(e=>e.from.module==='new_source'&&e.from.port==='output'&&e.to.module===endpoint.module&&e.to.port===endpoint.port))throw Error('未保存节点位置或连线');
+ if(JSON.stringify(s.levels[levelId].links.slice(0,-1))!==JSON.stringify(links))throw Error('旧连线被改动');
  const io=await call('/api/settings',{action:'io',levelId,fileRevisions:s.fileRevisions,node:{id:'new_sink',type:'output',name:'输出',description:'结果'},connect:{direction:'out',endpoint:{module:'new_source',port:'output'}}});
  if(io.error || !io.levels[levelId].links.some(e=>e.from.module==='new_source'&&e.to.module==='new_sink'&&e.to.port==='value'))throw Error(io.error||'未连接输出节点');
 }));
@@ -383,6 +417,41 @@ test('批量删除节点同时清除连线与布局，正式节点保留',()=>wi
    links:[{from:{module:'$self',port:'text'},to:{module:'$self',port:'result'},info:'直接交付'}],positions:{}});
  if(s.error)throw Error(s.error);
  readProject(project);
+}));
+
+test('已登记的 dist 资料进入新草稿，修改后旧草稿和执行计划失效', () => withCanvas('registered-dist', async ({ formal, open, request }) => {
+  const assert = (await import('node:assert/strict')).default;
+  const { mkdirSync, readFileSync, writeFileSync, existsSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+  const { executionPlan, runProject } = await import('../run.mjs');
+  const manifest = formal + '/module.json';
+  const meta = JSON.parse(readFileSync(manifest, 'utf8'));
+  writeFileSync(manifest, JSON.stringify({ ...meta, rootFiles: ['dist'] }));
+  for (const dir of ['dist', 'build', 'dist/build', 'dist/workspace']) mkdirSync(formal + '/' + dir);
+  const asset = formal + '/dist/asset.txt';
+  writeFileSync(asset, '旧资料');
+  writeFileSync(formal + '/dist/secrets.json', '{}');
+  writeFileSync(formal + '/dist/workspace/record.txt', '运行记录');
+  writeFileSync(formal + '/dist/build/manual.txt', '登记目录内的资料');
+  writeFileSync(formal + '/build/asset.txt', '普通构建产物');
+  const checked = spawnSync(process.execPath, [formal + '/check.mjs'], { encoding: 'utf8' });
+  assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+  const old = executionPlan(formal);
+  const draft = await open('登记的资料');
+  assert.equal(readFileSync(draft.path + '/dist/asset.txt', 'utf8'), '旧资料');
+  assert.equal(readFileSync(draft.path + '/dist/build/manual.txt', 'utf8'), '登记目录内的资料');
+  for (const path of ['dist/secrets.json', 'dist/workspace', 'build']) assert.equal(existsSync(draft.path + '/' + path), false, path);
+  const calls = [];
+  const executeAI = ({ id, values }) => { calls.push(id); return values; };
+  assert.deepEqual((await runProject(formal, { text: '输入' }, { expectedVersion: old.version, executeAI })).outputs, { result: '输入' });
+  writeFileSync(asset, '新资料');
+  calls.length = 0;
+  await assert.rejects(runProject(formal, { text: '输入' }, { expectedVersion: old.version, executeAI }), /正式项目已变化/);
+  assert.deepEqual(calls, []);
+  const drafts = await request('/api/drafts');
+  assert.equal(drafts.find(item => item.id === draft.id).stale, true);
+  const updated = await open('修改后的资料');
+  assert.equal(readFileSync(updated.path + '/dist/asset.txt', 'utf8'), '新资料');
 }));
 
 test('新草稿保留隐藏代码和资料，排除本地环境配置',()=>withCanvas('hidden-code',async({formal,open,request})=>{

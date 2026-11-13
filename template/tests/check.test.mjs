@@ -185,6 +185,63 @@ test('验收脚本失败会让检查失败', () => fixture(p => {
   bad(p, /验收失败/, ['--verify']);
 }));
 
+test('上游验收失败时跳过接收该组合输入的成员', () => fixture(p => {
+  edit(p, 'modules/a/module.json', data => { data.verify = 'verify.mjs'; });
+  writeFileSync(join(p, 'modules/a/verify.mjs'), 'console.error("上游失败"); process.exit(1);');
+  const combo = join(p, 'modules/b');
+  edit(p, 'modules/b/module.json', data => { delete data.implementation; });
+  addModule(combo, 'child', '接收上游材料', { verify: 'verify.mjs' });
+  writeFileSync(join(combo, 'modules/child/verify.mjs'), 'process.exit(0);');
+  writeFileSync(join(combo, 'connections.json'), JSON.stringify({ connections: [
+    { from: { module: '$self', port: 'text' }, to: { module: 'child', port: 'text' }, info: '上游材料' },
+    { from: { module: 'child', port: 'text' }, to: { module: '$self', port: 'text' }, info: '处理结果' },
+  ] }));
+  const result = run(p, ['--verify']);
+  assert.equal(result.code, 1, result.text);
+  assert.match(result.text, /验收失败：modules\/a/);
+  assert.match(result.text, /跳过验收：modules\/b\/modules\/child/);
+  assert.doesNotMatch(result.text, /✓ 验收通过：modules\/b\/modules\/child/);
+
+  writeFileSync(join(p, 'modules/a/verify.mjs'), 'process.exit(0);');
+  const passed = run(p, ['--verify']);
+  assert.equal(passed.code, 0, passed.text);
+  assert.match(passed.text, /✓ 验收通过：modules\/b\/modules\/child/);
+}));
+
+test('失败沿嵌套组合的输入和内部连线传递，另一输入的验收继续', () => fixture(p => {
+  edit(p, 'modules/a/module.json', data => { data.verify = 'verify.mjs'; });
+  writeFileSync(join(p, 'modules/a/verify.mjs'), 'process.exit(1);');
+  const outer = join(p, 'modules/b');
+  edit(p, 'modules/b/module.json', data => { delete data.implementation; });
+  writeFileSync(join(outer, 'README.md'), README.replace('"description": "待处理的文字" }', '"description": "待处理的文字" }, { "name": "other", "description": "独立材料" }'));
+  const link = (from, to, fromPort = 'text', toPort = 'text') => ({
+    from: { module: from, port: fromPort }, to: { module: to, port: toPort }, info: '传递材料',
+  });
+  edit(p, 'connections.json', data => { data.connections.push(link('$self', 'b', 'text', 'other')); });
+  addModule(outer, 'nested', '内层组合');
+  edit(p, 'modules/b/modules/nested/module.json', data => { delete data.implementation; });
+  addModule(outer, 'independent', '处理独立材料', { verify: 'verify.mjs' });
+  writeFileSync(join(outer, 'modules/independent/verify.mjs'), 'process.exit(0);');
+  writeFileSync(join(outer, 'connections.json'), JSON.stringify({ connections: [
+    link('$self', 'nested'), link('nested', '$self'), link('$self', 'independent', 'other'),
+  ] }));
+  const nested = join(outer, 'modules/nested');
+  for (const id of ['first', 'second']) {
+    addModule(nested, id, id, { verify: 'verify.mjs' });
+    writeFileSync(join(nested, 'modules', id, 'verify.mjs'), 'process.exit(0);');
+  }
+  writeFileSync(join(nested, 'connections.json'), JSON.stringify({ connections: [
+    link('$self', 'first'), link('first', 'second'), link('second', '$self'),
+  ] }));
+  const result = run(p, ['--verify']);
+  assert.equal(result.code, 1, result.text);
+  for (const id of ['first', 'second']) {
+    assert.ok(result.text.includes('跳过验收：modules/b/modules/nested/modules/' + id), result.text);
+    assert.ok(!result.text.includes('✓ 验收通过：modules/b/modules/nested/modules/' + id), result.text);
+  }
+  assert.match(result.text, /✓ 验收通过：modules\/b\/modules\/independent/);
+}));
+
 test('待配置模块被跳过，依赖它的成员和组合也跳过', () => fixture(p => {
   edit(p, leaf + '/module.json', d => d.status = 'pending');
   const r = run(p, ['--verify']);

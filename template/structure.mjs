@@ -140,7 +140,9 @@ export const ignoredHiddenEntry = name => ['.git', '.canvas-drafts', '.draft.jso
 export function projectFileFilter(tree) {
   const excluded = name => ['.git', '.canvas-drafts', '.draft.json', 'credentials.json', 'secrets.json'].includes(name) ||
     name === '.env' || name.startsWith('.env.') || /\.(pem|key)$/i.test(name);
-  const ignored = name => ignoredHiddenEntry(name) || ['workspace','node_modules','__pycache__','dist','build','venv','canvas-layout.json'].includes(name);
+  const buildDirectory = name => name === 'dist' || name === 'build';
+  const ignoredOutsideBuild = name => ignoredHiddenEntry(name) || ['workspace','node_modules','__pycache__','venv','canvas-layout.json'].includes(name);
+  const ignored = name => buildDirectory(name) || ignoredOutsideBuild(name);
   const protectedRoots = new Set();
   // 登记入口所在的排除目录已是本体，连同其中的依赖参与版本，不能只散列入口文件。
   for (const node of flatten(tree)) {
@@ -157,7 +159,10 @@ export function projectFileFilter(tree) {
   return path => {
     const parts = relative(tree.dir,path).split(/[\\/]/);
     if (parts.some(excluded)) return false;
-    if (['runs', 'outputs'].includes(parts[0]) && !rootFiles.includes(parts[0])) return false;
+    const [top, ...nested] = parts;
+    const registered = rootFiles.includes(top);
+    if (['runs', 'outputs'].includes(top) && !registered) return false;
+    if (registered && buildDirectory(top) && nested.every(name => !ignoredOutsideBuild(name))) return true;
     return protectedPaths.some(root => inside(root,path)) || parts.every(name => !ignored(name));
   };
 }

@@ -111,12 +111,31 @@ export function planPack(tree, { parentId, memberIds, id, name, fileRevisions })
     throw Error('包含条件连线的选区暂不支持自动组成组合，需先明确组合接口与条件流程；项目文件未修改');
   }
   const crossing = parent.links.filter(e => touching(e) && !isInner(e));
+  const incomingTargets = new Map();
+  for (const edge of crossing.filter(e => ids.has(e.to.module))) {
+    const source = JSON.stringify([edge.from.module, edge.from.port]);
+    const targets = incomingTargets.get(source) || [];
+    targets.push(JSON.stringify([edge.to.module, edge.to.port]));
+    incomingTargets.set(source, targets);
+  }
+  const inputGroups = new Map(), groupsByTarget = new Map();
+  for (const [source, targets] of incomingTargets) {
+    const group = JSON.stringify(targets.sort());
+    for (const target of targets) {
+      if (groupsByTarget.has(target) && groupsByTarget.get(target) !== group) {
+        throw Error('外部来源的接收接口部分重叠，自动组成组合会改变材料的交接，请先调整连线；项目文件未修改');
+      }
+      groupsByTarget.set(target, group);
+    }
+    inputGroups.set(source, group);
+  }
 
   const inputs = [], outputs = [], boundary = [], names = { input: new Map(), output: new Map() };
   const outer = crossing.map(edge => {
     const e = structuredClone(edge), incoming = !ids.has(e.from.module);
     const side = incoming ? 'input' : 'output', ports = incoming ? inputs : outputs;
-    const key = JSON.stringify(edge.from);
+    const source = JSON.stringify([edge.from.module, edge.from.port]);
+    const key = incoming ? inputGroups.get(source) : source;
     let name = names[side].get(key);
     if (!name) {
       const base = incoming ? edge.to.port : edge.from.port;
@@ -253,8 +272,8 @@ export function applyPack(tree, plan, { write = writeAtomic } = {}) {
   }
 }
 
-const e_from_key = (e) => e.from.module + '.' + e.from.port;
-const sameEnds = (a, b) => e_from_key(a) === e_from_key(b) && a.to.module + '.' + a.to.port === b.to.module + '.' + b.to.port;
+const connectionKey = ({ from, to }) => JSON.stringify([from.module, from.port, to.module, to.port]);
+const sameEnds = (a, b) => connectionKey(a) === connectionKey(b);
 
 // 新组合的说明书和检查标准。打包能确定的是成员和连接；职责和检查标准留给人补。
 // 新组合保持 pending；补齐说明和检查标准并自查通过后，才能改为 ready。
@@ -288,7 +307,6 @@ function saveLevel({ levelId, links, stop, positions, revision, fileRevisions })
   const file = join(level.dir, 'connections.json');
   if (hash(readText(file)) !== revision) throw Error('文件已被其他操作修改，请重新加载后再保存');
 
-  const ids = new Set(level.children.map(c => c.id));
   const ports = new Map([['$self', { outputs: level.inputs, inputs: level.outputs }], ...level.children.map(c => [c.id, { outputs: c.outputs, inputs: c.inputs }])]);
   for (const n of level.ioNodes || []) ports.set(n.id, ioPorts(n));
   for (const e of links) {
@@ -303,17 +321,17 @@ function saveLevel({ levelId, links, stop, positions, revision, fileRevisions })
     if (!String(e.info || '').trim()) throw Error('每条连接都要写传的是什么');
   }
   const stored = readJson(file);
-  const inputs = new Set();
+  // 保留已有的同端点条件线，防止本次保存意外新增重复连线。
+  const existingCounts = new Map(), counts = new Map();
+  for (const edge of stored.connections) {
+    const key = connectionKey(edge);
+    existingCounts.set(key, (existingCounts.get(key) || 0) + 1);
+  }
   for (const edge of links) {
-    const key = JSON.stringify([edge.to.module,edge.to.port]);
-    if (inputs.has(key)) {
-      const incoming = links.filter(e => e.to.module === edge.to.module && e.to.port === edge.to.port);
-      const old = stored.connections.filter(e => e.to.module === edge.to.module && e.to.port === edge.to.port);
-      if (incoming.length > old.length || incoming.some(e => !old.some(o => o.from.module === e.from.module && o.from.port === e.from.port))) {
-        throw Error('每个输入端口只能接收一个来源：' + edge.to.module + '.' + edge.to.port);
-      }
-    }
-    inputs.add(key);
+    const key = connectionKey(edge);
+    const count = (counts.get(key) || 0) + 1;
+    if (count > (existingCounts.get(key) || 1)) throw Error('同一对接口不能新增重复连线');
+    counts.set(key, count);
   }
   const next = { ...stored, connections: links };
   delete next.stop;
@@ -497,11 +515,7 @@ export function editStructure(data) {
     const fresh = { module:id, port:newPort.name };
     const source = direction === 'out' ? existingPort : newPort;
     const target = direction === 'out' ? fresh : existing;
-    const connections = record(owner).connections;
-    if (connections.some(e => e.to.module === target.module && e.to.port === target.port)) {
-      throw Error('这个输入端口已有来源，请先删除旧连线');
-    }
-    connections.push({
+    record(owner).connections.push({
       from:direction === 'out' ? existing : fresh,
       to:target,
       info:source.description?.trim() || source.name,

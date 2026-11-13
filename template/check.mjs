@@ -244,18 +244,17 @@ if (errors.length) { for (const e of errors) console.error('✗ ' + e); process.
 
 let ran = 0, skipped = 0;
 const failed = new Set();
+const parents = new Map(all.flatMap(node => node.children.map(child => [child, node])));
 // 上游待配置或验收没过时，下游拿到的产物还是未定稿的，一并跳过。
-// 上游按连接判断：to.module 是我、from.module 是别的成员的，那个成员就是我的上游。不看目录嵌套。
-const upstreamOf = (node) => {
-  const found = [];
-  for (const scope of [tree, ...walkAll(tree)]) {
-    for (const e of scope.links) {
-      if (e?.to?.module !== node.meta.id || e?.from?.module === '$self') continue;
-      const source = scope.children.find(c => c.meta.id === e.from.module);
-      if (source) found.push(source);
-    }
-  }
-  return found;
+// 组合输入沿同名外部接口继续追踪，避免一个输入失败就阻断其他输入的成员。
+const upstreamOf = (node, port) => {
+  const scope = parents.get(node);
+  if (!scope) return [];
+  return scope.links
+    .filter(edge => edge.to.module === node.meta.id && (port === undefined || edge.to.port === port))
+    .flatMap(({ from }) => from.module === '$self'
+      ? upstreamOf(scope, from.port)
+      : scope.children.filter(child => child.meta.id === from.module));
 };
 const isBlocked = (node, seen = new Set()) => {
   if (!node || seen.has(node)) return false;

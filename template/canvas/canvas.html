@@ -213,7 +213,6 @@
   #linkMenu button { display:block; width:100%; text-align:left; margin-top:4px; overflow-wrap:anywhere; }
   #status:popover-open { display:block; position:fixed; inset:60px auto auto 50%; transform:translateX(-50%); margin:0; width:max-content; max-width:calc(100vw - 24px); padding:10px 16px; border:1px solid #265569; border-radius:8px; background:#203e4d; color:#fff; font-size:14px; font-weight:600; box-shadow:0 4px 16px #22334445; pointer-events:none; overflow-wrap:anywhere; }
   #status.warning:popover-open { background:#7b331c; border-color:#7b331c; }
-  .port.port-blocked { background:#fff0e8; outline:2px solid #b55a32; outline-offset:-2px; }
   .display-mode #levelSettings, .display-mode #save, .display-mode #pack, .display-mode #composeSelection, .display-mode [data-settings], .display-mode [data-check], .display-mode .resize-handle { display:none!important; }
   .display-mode .node .head, .display-mode .port, .display-mode .dot, .display-mode #edges .hit { cursor:default!important; }
   #draftDialog { width:min(680px,calc(100vw - 24px)); }
@@ -846,7 +845,6 @@ document.addEventListener('mouseup', (e) => {
 });
 
 function showLinkMenu(event, endpoint, direction) {
-  if (direction === 'in' && inputOccupied(endpoint)) return;
   const menu = $('linkMenu');
   const heading = document.createElement('strong');
   heading.textContent = '新建并连接节点';
@@ -887,22 +885,9 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') $('linkMenu').hidden = true;
 });
 
-function inputOccupied(endpoint) {
-  if (!state.draft.some(edge => edge.to.module === endpoint.module && edge.to.port === endpoint.port)) return false;
-  const port = [...$('board').querySelectorAll('[data-dot="in"]')].find(dot => dot.dataset.id === endpoint.module && dot.dataset.port === endpoint.port);
-  const row = port?.closest('.port');
-  if (row) {
-    row.classList.add('port-blocked');
-    clearTimeout(row.blockedTimer);
-    row.blockedTimer = setTimeout(() => row.classList.remove('port-blocked'),4500);
-  }
-  toast('这个输入端口已有来源，请双击删除旧连线后再连接', 5500, true);
-  return true;
-}
-
 function connectPorts(from, to) {
   const duplicate = state.draft.some(edge => edge.from.module === from.module && edge.from.port === from.port && edge.to.module === to.module && edge.to.port === to.port);
-  if (duplicate || inputOccupied(to)) return;
+  if (duplicate) return;
   const source = document.querySelector('[data-dot="out"][data-id="' + sel(from.module) + '"][data-port="' + sel(from.port) + '"]');
   const info = source?.getAttribute('title')?.trim() || from.port;
   state.draft.push({from, to, info});

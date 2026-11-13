@@ -114,6 +114,46 @@ test('无关条件边不阻止打包，正常接力结果保持一致', () => fi
   assert.deepEqual(after.outputs, { result: '材料:a:b' });
 }));
 
+test('打包保留同一输入的备选来源，两份材料到齐时也分别处理', () => fixture(async root => {
+  const file = join(root, 'connections.json');
+  writeFileSync(file, JSON.stringify({ connections: [
+    edge('$self', 'c'), edge('$self', 'd', '启用备用来源'), edge('c', 'a'), edge('d', 'a'),
+    edge('a', 'b'), edge('b', '$self'),
+  ] }));
+  const execute = async alternate => {
+    const calls = [];
+    const { outputs } = await runProject(root, { text: '材料' }, {
+      evaluateWhen: () => alternate,
+      executeAI: async ({ id, values }) => {
+        if (['a', 'b'].includes(id)) calls.push([id, values.text]);
+        return { text: values.text + ':' + id };
+      },
+    });
+    return { outputs, calls };
+  };
+  const before = [await execute(false), await execute(true)];
+  assert.deepEqual(before.map(result => result.calls.length), [2, 4]);
+  const tree = readProject(root), plan = planPack(tree, selection);
+  assert.equal(plan.inputs.length, 1);
+  assert.equal(plan.outer.filter(edge => edge.to.module === 'flow' && edge.to.port === plan.inputs[0].name).length, 2);
+  applyPack(tree, plan);
+  const metadata = join(root, 'modules/flow/module.json');
+  const meta = JSON.parse(readFileSync(metadata));
+  writeFileSync(metadata, JSON.stringify({ ...meta, status: 'ready' }));
+  const check = spawnSync(process.execPath, [join(root, 'check.mjs')], { encoding: 'utf8' });
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+  assert.deepEqual([await execute(false), await execute(true)], before);
+}));
+
+test('打包在外部来源的接收接口部分重叠时拒绝写盘', () => fixture(root => {
+  writeFileSync(join(root, 'connections.json'), JSON.stringify({ connections: [
+    edge('$self', 'c'), edge('$self', 'd'), edge('c', 'a'), edge('d', 'a'), edge('c', 'b'), edge('b', '$self'),
+  ] }));
+  const before = filesAt(root);
+  assert.throws(() => planPack(readProject(root), selection), /外部来源的接收接口部分重叠/);
+  assert.deepEqual(filesAt(root), before);
+}));
+
 test('生成的待配置组合通过真实结构检查并明确缺项处理', () => fixture(root => {
   const tree = readProject(root), plan = planPack(tree, selection);
   const files = combinationFiles(plan);
