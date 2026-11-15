@@ -154,14 +154,27 @@ test('打包在外部来源的接收接口部分重叠时拒绝写盘', () => fi
   assert.deepEqual(filesAt(root), before);
 }));
 
-test('生成的待配置组合通过真实结构检查并明确缺项处理', () => fixture(root => {
+test('打包保留输入输出并要求补齐设计，结构通过后仍不可运行', () => fixture(async root => {
   const tree = readProject(root), plan = planPack(tree, selection);
   const files = combinationFiles(plan);
   assert.match(files['README.md'], /## 没完成时\s+当前组合为待配置状态，不得运行/);
+  assert.match(files['README.md'], /## 输入\s+以下接口按现有连接整理，尚需核对/);
+  assert.match(files['README.md'], /## 输出\s+以下接口按现有连接整理，尚需核对/);
+  assert.match(files['README.md'], /结构与组合设计检查/);
+  assert.doesNotMatch(files['README.md'], /收集成员的交付后对外输出/);
   applyPack(tree, plan);
   const result = spawnSync(process.execPath, [join(root, 'check.mjs')], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(JSON.parse(readFileSync(join(root, 'modules/flow/module.json'))).status, 'pending');
+  const packed = readProject(root).children.find(node => node.id === 'flow');
+  assert.deepEqual(packed.inputs, plan.inputs);
+  assert.deepEqual(packed.outputs, plan.outputs);
+  assert.deepEqual(packed.links, plan.inner);
+  let calls = 0;
+  await assert.rejects(runProject(root, { text: '材料' }, {
+    executeAI: async () => { calls++; return { text: '不应执行' }; },
+  }), /模块尚未完成，不得运行/);
+  assert.equal(calls, 0);
 }));
 
 function linkedFixture(root) {

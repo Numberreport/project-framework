@@ -275,8 +275,8 @@ export function applyPack(tree, plan, { write = writeAtomic } = {}) {
 const connectionKey = ({ from, to }) => JSON.stringify([from.module, from.port, to.module, to.port]);
 const sameEnds = (a, b) => connectionKey(a) === connectionKey(b);
 
-// 新组合的说明书和检查标准。打包能确定的是成员和连接；职责和检查标准留给人补。
-// 新组合保持 pending；补齐说明和检查标准并自查通过后，才能改为 ready。
+// 打包只生成结构草稿。保留连接推导的接口，业务输入输出和共同任务仍须核对。
+// 新组合保持 pending；启用条件见项目 AGENTS.md 的组合设计检查要求。
 export function combinationFiles(plan) {
   const portBlock = (ports) => '```interfaces\n' + JSON.stringify(ports, null, 2) + '\n```';
   const memberList = plan.members.map(m => '- ' + m.name + '（' + m.id + '）').join('\n');
@@ -284,14 +284,16 @@ export function combinationFiles(plan) {
   const list = (ports, empty) => ports.length ? ports.map(p => '- ' + p.name + '：' + p.description).join('\n') : empty;
   const files = {
     'module.json': JSON.stringify({ id: plan.id, name: plan.name, template: { id: 'project-framework', version: '3.0.0' }, status: 'pending' }, null, 2) + '\n',
-    'README.md': '# ' + plan.name + '\n\n## 职责\n\n由画布打包生成，负责组织以下模块完成一项任务；具体职责请补充一句话说明。\n\n' +
+    'README.md': '# ' + plan.name + '\n\n## 职责\n\n由画布打包生成的结构草稿。请说明本组合为谁完成什么共同任务，再核对以下成员各自的作用。\n\n' +
       '成员：\n\n' + memberList + '\n\n' +
-      '## 输入\n\n' + list(plan.inputs, '本组合不接收外部输入。') + '\n\n' + portBlock(plan.inputs) + '\n\n' +
-      '## 输出\n\n' + list(plan.outputs, '本组合不对外输出。') + '\n\n' + portBlock(plan.outputs) + '\n\n' +
-      '## 处理流程\n\n按 connections.json 把输入交给成员，收集成员的交付后对外输出。\n\n内部连接：\n\n' + flow +
-      '\n\n## 没完成时\n\n当前组合为待配置状态，不得运行。缺少职责、处理规则、连接或检查标准时停止并说明缺项；补齐并自检后再改为 ready。\n',
-    'VALIDATION.md': '# 检查标准\n\n组合整体的交付怎样算合格，请结合成员各自的 VALIDATION.md 补充。\n\n' +
-      '完成后把 module.json 的状态从 pending 改成 ready。\n',
+      '## 输入\n\n以下接口按现有连接整理，尚需核对。请写清完成共同任务需要外部提供哪些材料、各在什么条件下需要；内部能产出的材料不要求外部重复提供。确定后同步调整接口和连接。\n\n' +
+      list(plan.inputs, '现有连接未形成外部输入接口，请核对是否确实不需要外部材料。') + '\n\n' + portBlock(plan.inputs) + '\n\n' +
+      '## 输出\n\n以下接口按现有连接整理，尚需核对。请写清交给接收方的具体成果；仅供成员使用的材料留在内部，检查报告和保存回执按需要附带。确定后同步调整接口和连接。\n\n' +
+      list(plan.outputs, '现有连接未形成对外输出接口，请补清最终成果及其交付方式。') + '\n\n' + portBlock(plan.outputs) + '\n\n' +
+      '## 处理流程\n\n请根据共同任务说明各成员怎样配合、材料怎样交接，以及什么条件下允许对外交付；适用的分支和已有材料接入也须写清。以下连接只记录现有结构，不代表设计已完成。\n\n内部连接：\n\n' + flow +
+      '\n\n## 没完成时\n\n当前组合为待配置状态，不得运行。请补充缺材料、处理失败、检查不通过时怎样停止或退回。缺少设计内容或验证依据时记录缺口；补齐后按项目 AGENTS.md 的检查要求完成结构与组合设计检查，通过后再改为 ready。\n',
+    'VALIDATION.md': '# 检查标准\n\n请按本组合 README 声明的共同任务，填写最终成果满足接收方用途的具体合格条件；不能只要求各成员分别合格。\n\n' +
+      '涉及多份成果或条件分支时，分别写清适用的验收条件；需要检查或保存的成果，写清对应的检查结论或保存证据。启用前的设计检查按项目 AGENTS.md 执行。\n',
   };
   return files;
 }

@@ -235,7 +235,7 @@
     <button id="save">立即保存</button>
   </div>
 </div>
-<div id="canvasNavigation"><button id="drawerToggle" aria-controls="side" aria-expanded="false" title="展开模块列表">模块</button><button id="backLevel" hidden>← 返回上一级</button><button id="openDrafts">草稿</button><button id="showFormal" hidden>返回显示模式</button></div>
+<div id="canvasNavigation"><button id="drawerToggle" aria-controls="side" aria-expanded="false" title="展开模块列表">模块</button><button id="backLevel" hidden>← 返回上一级</button><button id="openDrafts">草稿</button><button id="showFormal" hidden>返回显示模式</button><button id="arrangeLayout" title="按流程整理当前层；显示模式仅调整本次浏览">整理布局</button></div>
 <div id="saveStatus" role="status" aria-live="polite">显示模式 · 只读</div>
 <div id="structureError" role="alert" hidden style="position:fixed;top:64px;left:16px;right:16px;z-index:20;padding:16px;background:#fff0ec;color:#842b20;border:1px solid #d79c8b"></div>
 <div id="stage">
@@ -265,6 +265,7 @@ const $ = (id) => document.getElementById(id);
 const draftId = new URLSearchParams(location.search).get('draft');
 const editable = Boolean(draftId);
 const browseViews = new Map();
+const levelScrolls = new Map();
 document.body.classList.toggle('display-mode', !editable);
 const state = { data: null, levelId: null, path: [], draft: [], stop: '', dirty: false, positions: {} };
 
@@ -310,7 +311,7 @@ async function reload(levelId) {
     formalError();
     levelId = levelId || new URLSearchParams(location.search).get('scope');
     if (!state.data.levels[levelId]) levelId = state.data.root.id;
-    openLevel(levelId || new URLSearchParams(location.search).get('scope'), true);
+    openLevel(levelId, !state.levelId);
   } catch (e) {
     formalError(e.message);
     toast('读取失败：' + e.message, 8000);
@@ -320,25 +321,26 @@ async function reload(levelId) {
 function openLevel(id, resetPath) {
   const level = state.data.levels[id];
   if (!level) return;
-  if (!editable && state.levelId) browseViews.set(state.levelId,state.positions);
+  if(state.levelId)levelScrolls.set(state.levelId,{left:$('stage').scrollLeft,top:$('stage').scrollTop});
+  if (!editable && state.levelId) browseViews.set(state.levelId,{positions:state.positions,source:state.layoutSource});
   state.levelId = id;
   state.draft = JSON.parse(JSON.stringify(level.links));
   state.stop = level.stop || '';
   state.dirty = false;
   state.positions = JSON.parse(JSON.stringify(state.data.layout[id] || {}));
+  state.layoutSource = JSON.stringify(state.data.layout[id] || {});
   if (!editable) {
     const previous = browseViews.get(id);
-    if (previous?.$view) state.positions.$view = previous.$view;
-    for (const member of level.members) {
-      if (previous?.[member.id]?.expanded === undefined) continue;
-      state.positions[member.id] = {...state.positions[member.id],expanded:previous[member.id].expanded};
-    }
+    if (previous?.source === state.layoutSource) state.positions = JSON.parse(JSON.stringify(previous.positions));
   }
-  if (resetPath) state.path = [];
+  state.path = resetPath ? [] : state.path.filter(step=>state.data.levels[step.id] && step.id!==id);
   markDirty(false);
   renderSide();
   applyZoom();
   render();
+  const scroll=levelScrolls.get(id);
+  $('stage').scrollLeft=scroll?.left || 0;
+  $('stage').scrollTop=scroll?.top || 0;
 }
 
 let autoSaveTimer = null, saving = null, editVersion = 0, saveFailed = false;
@@ -357,16 +359,17 @@ function markDirty(value) {
 }
 
 function parentLevelId() {
-  return Object.values(state.data.levels).find(level => level.members.some(member => member.id === state.levelId))?.id;
+  return state.path.at(-1)?.id;
 }
 
 function renderSide() {
   $('linkMenu').hidden = true;
-  $('backLevel').hidden = window.parent !== window || !parentLevelId();
+  const parent=parentLevelId();
+  $('backLevel').hidden = !parent;
+  $('backLevel').textContent = parent ? '← 返回' + state.data.levels[parent].name : '← 返回上一级';
   const level = state.data.levels[state.levelId];
-  const trail = ['<a data-go="' + state.data.root.id + '">' + esc(state.data.root.name) + '</a>'];
-  for (const step of state.path) trail.push('<a data-go="' + step.id + '">' + esc(step.name) + '</a>');
-  if (state.levelId !== state.data.root.id && !state.path.length) trail.push(esc(level.name));
+  const trail = state.path.map(step=>'<a data-go="' + esc(step.id) + '">' + esc(step.name) + '</a>');
+  trail.push(esc(level.name));
   $('breadcrumb').innerHTML = trail.join(' / ');
   $('members').innerHTML = [...level.members, ...(level.ioNodes || []).map(n => ({ ...n, summary:n.description }))].map(m =>
     '<div class="member" data-open="' + esc(m.id) + '">' +
@@ -389,7 +392,22 @@ function updatePackButton() {
 
 // ---- 画布 -------------------------------------------------------------------
 
-function applyZoom() { const view = state.positions.$view || {}, scale = view.zoom || 1; $('board').style.zoom = scale; $('board').style.transform = `translate(${(view.panX || 0) / scale}px, ${(view.panY || 0) / scale}px)`; $('zoomValue').textContent = Math.round(scale*100) + '%'; }
+function applyZoom() {
+  const view=state.positions.$view || {},scale=view.zoom || 1;
+  const translation=`translate(${view.panX || 0}px, ${view.panY || 0}px)`;
+  $('board').style.transformOrigin='0 0';
+  $('board').style.transform=translation+` scale(${scale})`;
+  const svg=$('edges');
+  svg.style.transform=translation;
+  svg.style.width=(Number(svg.dataset.width)||1250)*scale+'px';
+  svg.style.height=(Number(svg.dataset.height)||900)*scale+'px';
+  $('zoomValue').textContent=Math.round(scale*100)+'%';
+}
+function canvasPoint(clientX,clientY) {
+  const bounds=$('stage').getBoundingClientRect(),view=state.positions.$view || {},scale=view.zoom || 1;
+  return {x:(clientX-bounds.left+$('stage').scrollLeft-(view.panX || 0))/scale,
+    y:(clientY-bounds.top+$('stage').scrollTop-(view.panY || 0))/scale};
+}
 function changeZoom(delta, anchor) {
   const stage = $('stage'), previous = state.positions.$view?.zoom || 1;
   const zoom = Math.min(1.5, Math.max(.4, previous + delta));
@@ -401,7 +419,7 @@ function changeZoom(delta, anchor) {
   const left = (stage.scrollLeft + x - (view.panX || 0)) / previous, top = (stage.scrollTop + y - (view.panY || 0)) / previous;
   state.positions.$view = { ...view, zoom, panX:stage.scrollLeft + x - left * zoom, panY:stage.scrollTop + y - top * zoom };
   applyZoom();
-  drawEdges(); markDirty(true);
+  markDirty(true);
 }
 $('zoomIn').onclick = () => changeZoom(.1);
 $('zoomOut').onclick = () => changeZoom(-.1);
@@ -463,7 +481,7 @@ $('stage').addEventListener('pointerdown', e => {
   const move = event => {
     if (event.pointerId !== e.pointerId) return;
     state.positions.$view = { ...state.positions.$view, panX:origin.left + event.clientX - origin.x, panY:origin.top + event.clientY - origin.y };
-    applyZoom(); drawEdges(); markDirty(true);
+    applyZoom(); markDirty(true);
   };
   const end = event => {
     if (event.pointerId !== e.pointerId) return;
@@ -490,26 +508,156 @@ $('stage').addEventListener('wheel', e => {
 function nodesOf(level) {
   const list = [];
   for (const type of ['input', 'output']) {
-    (type === 'input' ? level.inputs : level.outputs).forEach((p, i) => list.push({ id: '$' + type + ':' + p.name, name: p.name, description: p.description, type, boundary: true, port: p.name,
-      inputs: type === 'output' ? [p] : [], outputs: type === 'input' ? [p] : [], x: type === 'input' ? 30 : 900, y: 70 + i * 190 }));
+    (type === 'input' ? level.inputs : level.outputs).forEach(p => list.push({ id: '$' + type + ':' + p.name, name: p.name, description: p.description, type, boundary: true, port: p.name,
+      inputs: type === 'output' ? [p] : [], outputs: type === 'input' ? [p] : [] }));
   }
   for (const m of level.members) list.push(m);
   for (const n of level.ioNodes || []) list.push({ ...n, inputs: n.type === 'output' ? [{ name: 'value', description: n.description }] : [], outputs: n.type === 'input' ? [{ name: 'value', description: n.description }] : [] });
   return list;
 }
 
-function positionOf(id, index) {
-  return state.positions[id] || { x: 60 + Math.floor(index / 3) * 280, y: 40 + (index % 3) * 210 };
+// Work in unscaled board coordinates, using the rendered card dimensions.
+function cardsOverlap(a, b, gap = 24) {
+  return a.x < b.x+b.width+gap && a.x+a.width+gap > b.x &&
+    a.y < b.y+b.height+gap && a.y+a.height+gap > b.y;
 }
 
+function arrangeNodes(nodes, links) {
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const endpoint = (p, side) => p.module === '$self' ? '$'+side+':'+p.port : p.module;
+  const edges = links.map(e => ({from:endpoint(e.from,'input'), to:endpoint(e.to,'output'), kind:e.kind}))
+    .filter(e => byId.has(e.from) && byId.has(e.to));
+  const neighbors = new Map(nodes.map(n => [n.id, []]));
+  for (const e of edges) { neighbors.get(e.from).push(e.to); neighbors.get(e.to).push(e.from); }
+  const seen = new Set(), groups = [];
+  for (const n of nodes) {
+    if (seen.has(n.id)) continue;
+    const group = [], queue = [n.id]; seen.add(n.id);
+    for (let i=0;i<queue.length;i++) {
+      const id=queue[i]; group.push(byId.get(id));
+      for (const next of neighbors.get(id)) if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+    groups.push(group);
+  }
+  groups.sort((a,b) => b.length-a.length);
+  const positions = {}; let top=90;
+  const singletons = groups.filter(g => g.length===1).flat();
+  for (const group of groups.filter(g => g.length>1)) {
+    const ids = new Set(group.map(n=>n.id));
+    const forward = edges.filter(e=>ids.has(e.from) && e.kind!=='return');
+    const outgoing = new Map(group.map(n=>[n.id,[]]));
+    for (const e of forward) outgoing.get(e.from).push(e.to);
+    // Collapse cycles before ranking so feedback cannot keep extending a row.
+    let serial=0; const number=new Map(), low=new Map(), stack=[], active=new Set(), components=[];
+    function visit(id) {
+      number.set(id,serial); low.set(id,serial++); stack.push(id); active.add(id);
+      for (const next of outgoing.get(id)) {
+        if (!number.has(next)) { visit(next); low.set(id,Math.min(low.get(id),low.get(next))); }
+        else if (active.has(next)) low.set(id,Math.min(low.get(id),number.get(next)));
+      }
+      if (low.get(id)===number.get(id)) {
+        const component=[]; let next;
+        do { next=stack.pop(); active.delete(next); component.push(next); } while(next!==id);
+        components.push(component);
+      }
+    }
+    group.forEach(n=>{if(!number.has(n.id))visit(n.id);});
+    const owner=new Map(); components.forEach((c,i)=>c.forEach(id=>owner.set(id,i)));
+    const ranks=components.map(()=>0), indegree=components.map(()=>0), after=components.map(()=>new Set());
+    for (const e of forward) {
+      const a=owner.get(e.from),b=owner.get(e.to);
+      if(a!==b&&!after[a].has(b)){after[a].add(b);indegree[b]++;}
+    }
+    const queue=indegree.flatMap((d,i)=>d?[]:[i]);
+    for(let i=0;i<queue.length;i++)for(const next of after[queue[i]]) {
+      ranks[next]=Math.max(ranks[next],ranks[queue[i]]+1);
+      if(!--indegree[next])queue.push(next);
+    }
+    const rank=new Map(group.map(n=>[n.id,ranks[owner.get(n.id)]]));
+    // Place a material beside its first consumer, and a result beside its producer.
+    for(const n of group) if(n.type==='input') {
+      const targets=forward.filter(e=>e.from===n.id).map(e=>rank.get(e.to));
+      if(targets.length)rank.set(n.id,Math.max(0,Math.min(...targets)-1));
+    }
+    const columns=Array.from({length:Math.max(...rank.values())+1},()=>[]);
+    group.forEach(n=>columns[rank.get(n.id)].push(n));
+    const order=new Map();
+    const refresh=()=>columns.forEach(col=>col.forEach((n,i)=>order.set(n.id,i)));
+    refresh();
+    for(let pass=0;pass<4;pass++) {
+      const sweep=pass%2?[...columns].reverse():columns;
+      for(const col of sweep) {
+        const barycenter=n=>{
+          const related=neighbors.get(n.id).filter(id=>pass%2?rank.get(id)>rank.get(n.id):rank.get(id)<rank.get(n.id));
+          return related.length?related.reduce((sum,id)=>sum+order.get(id),0)/related.length:order.get(n.id);
+        };
+        const scores=new Map(col.map(n=>[n.id,barycenter(n)]));
+        col.sort((a,b)=>scores.get(a.id)-scores.get(b.id));refresh();
+      }
+    }
+    let x=40,bottom=top;
+    for(const col of columns) {
+      if(!col.length)continue;
+      let y=top;
+      for(const n of col) { positions[n.id]={x,y}; y+=n.height+64; }
+      bottom=Math.max(bottom,y);
+      x+=Math.max(...col.map(n=>n.width))+180;
+    }
+    top=bottom+100;
+  }
+  for(const n of singletons)positions[n.id]={x:0,y:0};
+  // Pack disconnected flows into separate blocks instead of one very tall list.
+  const blocks=groups.map(group=>{
+    const left=Math.min(...group.map(n=>positions[n.id].x)),upper=Math.min(...group.map(n=>positions[n.id].y));
+    return {group,left,upper,width:Math.max(...group.map(n=>positions[n.id].x+n.width))-left,
+      height:Math.max(...group.map(n=>positions[n.id].y+n.height))-upper};
+  });
+  const rowWidth=Math.max(2400,...blocks.map(b=>b.width));
+  let blockX=40,blockY=90,rowHeight=0;
+  for(const block of blocks) {
+    if(blockX>40&&blockX+block.width>rowWidth+40){blockX=40;blockY+=rowHeight+140;rowHeight=0;}
+    for(const n of block.group){positions[n.id].x+=blockX-block.left;positions[n.id].y+=blockY-block.upper;}
+    blockX+=block.width+140;rowHeight=Math.max(rowHeight,block.height);
+  }
+  return positions;
+}
+
+let renderingCards=false;
+function layoutCards(force=false) {
+  if(renderingCards)return false;
+  const level=state.data.levels[state.levelId], nodes=nodesOf(level);
+  const elements=[...$('board').querySelectorAll(':scope > .node')];
+  const measured=elements.map(el=>({...nodes.find(n=>n.id===el.dataset.id),
+    x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight}));
+  const missing=measured.some(n=>!Number.isFinite(state.positions[n.id]?.x)||!Number.isFinite(state.positions[n.id]?.y));
+  const crowded=measured.some((a,i)=>measured.slice(i+1).some(b=>cardsOverlap(a,b)));
+  if(!force&&!missing&&!crowded)return false;
+  const positions=arrangeNodes(measured,state.draft);
+  for(const el of elements) {
+    const p=positions[el.dataset.id];
+    el.style.left=p.x+'px';el.style.top=p.y+'px';
+    state.positions[el.dataset.id]={...state.positions[el.dataset.id],...p};
+  }
+  return true;
+}
+
+$('arrangeLayout').onclick=()=>{
+  if(!state.data || $('board').hidden)return;
+  layoutCards(true);
+  state.positions.$view={...state.positions.$view,panX:0,panY:0};
+  $('stage').scrollLeft=0;$('stage').scrollTop=0;
+  applyZoom();drawEdges();markDirty(true);
+  toast(editable?'已整理当前层，正在保存草稿':'已整理当前层，仅用于本次浏览');
+};
+
 function render() {
+  renderingCards=true;
   const level = state.data.levels[state.levelId];
   const board = $('board');
   board.querySelectorAll('iframe').forEach(f => frameCache.set(f.dataset.combo, f));
   board.innerHTML = '';
-  nodesOf(level).forEach((node, index) => {
-    const innerIndex = nodesOf(level).filter(n => !n.boundary).findIndex(n => n.id === node.id);
-    const pos = state.positions[node.id] || (node.boundary ? { x: node.x, y: node.y } : { x: 370, y: 70 + innerIndex * 260 });
+  nodesOf(level).forEach(node => {
+    const pos = state.positions[node.id] || {x:40,y:90};
     const el = document.createElement('div');
     el.className = 'node' + (node.type ? ' io-' + node.type : '');
     el.style.left = pos.x + 'px';
@@ -563,7 +711,7 @@ function render() {
           el.classList.toggle('expanded', !frame.hidden);
           state.positions[node.id] = { ...state.positions[node.id],x:el.offsetLeft,y:el.offsetTop,expanded:!frame.hidden }; markDirty(true);
           e.target.textContent = frame.hidden ? '展开内部' : '收起内部';
-          applySize(); drawEdges(); return;
+          applySize(); layoutCards(); drawEdges(); return;
 
         } else {
           const frame = document.createElement('iframe');
@@ -573,7 +721,7 @@ function render() {
           el.append(frame); el.classList.add('expanded'); e.target.textContent = '收起内部';
           state.positions[node.id] = { ...state.positions[node.id],x:el.offsetLeft,y:el.offsetTop,expanded:true }; markDirty(true);
         }
-        applySize(); drawEdges();
+        applySize(); layoutCards(); drawEdges();
       };
       applySize();
     }
@@ -607,7 +755,9 @@ function render() {
       });
     });
   });
+  renderingCards=false;
   updatePackButton();
+  if(layoutCards())markDirty(true);
   drawEdges();
 }
 
@@ -631,6 +781,49 @@ function roundedRoute(path, radius=22) {
 
 // Route every combination through the same measured port/obstacle rules.
 // Endpoints are never moved; separate lanes are display geometry only.
+function routeThroughGaps(start, end, boxes, blocked, padding=20) {
+  const xs=[...new Set([start.x,end.x,...boxes.flatMap(r=>[r.x-padding,r.x+r.width+padding])])].sort((a,b)=>a-b);
+  const ys=[...new Set([start.y,end.y,...boxes.flatMap(r=>[r.y-padding,r.y+r.height+padding])])].sort((a,b)=>a-b);
+  const width=xs.length, target=ys.indexOf(end.y)*width+xs.indexOf(end.x);
+  const origin=ys.indexOf(start.y)*width+xs.indexOf(start.x);
+  const point=id=>({x:xs[id%width],y:ys[Math.floor(id/width)]});
+  const heuristic=id=>{const p=point(id);return Math.abs(p.x-end.x)+Math.abs(p.y-end.y);};
+  const heap=[], distance=new Map(), previous=new Map(), obstruction=new Map();
+  const push=item=>{heap.push(item);let i=heap.length-1;while(i){const p=(i-1)>>1;if(heap[p].score<=item.score)break;heap[i]=heap[p];i=p;}heap[i]=item;};
+  const pop=()=>{
+    const first=heap[0],last=heap.pop();
+    if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1].score<heap[c].score)c++;if(heap[c].score>=last.score)break;heap[i]=heap[c];i=c;}heap[i]=last;}
+    return first;
+  };
+  // Direction is part of the state, so a short route with fewer bends wins.
+  const initial=origin*2;distance.set(initial,0);push({key:initial,cost:0,score:heuristic(origin)});
+  while(heap.length) {
+    const current=pop();if(current.cost!==distance.get(current.key))continue;
+    const id=Math.floor(current.key/2),direction=current.key%2;
+    if(id===target) {
+      const result=[];let key=current.key;
+      while(key!==undefined){result.push(point(Math.floor(key/2)));key=previous.get(key);}
+      result.reverse();
+      return result.filter((p,i)=>!i||i===result.length-1||
+        !((result[i-1].x===p.x&&p.x===result[i+1].x)||(result[i-1].y===p.y&&p.y===result[i+1].y)));
+    }
+    const x=id%width,y=Math.floor(id/width),p=point(id);
+    const adjacent=[];
+    if(x)adjacent.push(id-1);if(x+1<width)adjacent.push(id+1);
+    if(y)adjacent.push(id-width);if(y+1<ys.length)adjacent.push(id+width);
+    for(const next of adjacent) {
+      const q=point(next),segment=Math.min(id,next)+':'+Math.max(id,next);
+      if(!obstruction.has(segment))obstruction.set(segment,blocked(p,q));
+      if(obstruction.get(segment))continue;
+      const dir=p.y===q.y?0:1,key=next*2+dir;
+      const cost=current.cost+Math.abs(p.x-q.x)+Math.abs(p.y-q.y)+(dir!==direction?24:0);
+      if(cost>=(distance.get(key)??Infinity))continue;
+      distance.set(key,cost);previous.set(key,current.key);push({key,cost,score:cost+heuristic(next)});
+    }
+  }
+  return null;
+}
+
 function connectionRoute(a,b,{boxes=[],source,target,index=0,used=[],returning=false}={}) {
  const pad=22, lane=28+(index%7)*12;
  const s=boxes.find(r=>r.id===source),t=boxes.find(r=>r.id===target);
@@ -655,8 +848,8 @@ function connectionRoute(a,b,{boxes=[],source,target,index=0,used=[],returning=f
     const horizontal=p.y===q.y&&u.y===v.y&&Math.abs(p.y-u.y)<10;
     const vertical=p.x===q.x&&u.x===v.x&&Math.abs(p.x-u.x)<10;
     const sharedStart=old[0].x===a.x&&old[0].y===a.y;
-    if(!sharedStart&&horizontal&&Math.min(Math.max(p.x,q.x),Math.max(u.x,v.x))-Math.max(Math.min(p.x,q.x),Math.min(u.x,v.x))>24)score+=350;
-    if(!sharedStart&&vertical&&Math.min(Math.max(p.y,q.y),Math.max(u.y,v.y))-Math.max(Math.min(p.y,q.y),Math.min(u.y,v.y))>24)score+=350;
+    if(!sharedStart&&horizontal&&Math.min(Math.max(p.x,q.x),Math.max(u.x,v.x))-Math.max(Math.min(p.x,q.x),Math.min(u.x,v.x))>24)score+=40;
+    if(!sharedStart&&vertical&&Math.min(Math.max(p.y,q.y),Math.max(u.y,v.y))-Math.max(Math.min(p.y,q.y),Math.min(u.y,v.y))>24)score+=40;
    }
   }
   candidates.push({points,score});
@@ -668,11 +861,20 @@ function connectionRoute(a,b,{boxes=[],source,target,index=0,used=[],returning=f
  const bottom=Math.max(s?s.y+s.height:a.y,t?t.y+t.height:b.y)+55+lane;
  const levels=feedback?[bottom]:[Math.max(a.y,b.y)+lane,Math.min(a.y,b.y)-lane];
  for(const r of boxes){if(!feedback||r.y+r.height+pad+lane>=bottom)levels.push(r.y+r.height+pad+lane);if(!feedback)levels.push(Math.max(20,r.y-pad-lane));}
- for(const y of [...new Set(levels)])for(const offset of [0,16,32]){
+ // A clear forward channel needs no search around the rest of the canvas.
+ const detours=candidates.length?[]:[...new Set(levels)].sort((x,y)=>
+  Math.abs(a.y-x)+Math.abs(b.y-x)-Math.abs(a.y-y)-Math.abs(b.y-y)).slice(0,16);
+ for(const y of detours)for(const offset of [0,16,32]){
   const x1=right+offset,x2=left-offset;
   add([a,{x:x1,y:a.y},{x:x1,y},{x:x2,y},{x:x2,y:b.y},b]);
  }
  candidates.sort((x,y)=>x.score-y.score);
+ const directDistance=Math.abs(a.x-b.x)+Math.abs(a.y-b.y);
+ if(!candidates.length || candidates[0].score>directDistance+180) {
+  const gapRoute=routeThroughGaps({x:right,y:a.y},{x:left,y:b.y},boxes,blocked,20+(index%4)*10);
+  if(gapRoute)add([a,...gapRoute,b]);
+  candidates.sort((x,y)=>x.score-y.score);
+ }
  let points=candidates[0]?.points;
  if(!points){
   // Keep endpoints visible even for overlapping user-positioned cards; flag the unresolved route.
@@ -685,7 +887,7 @@ function connectionRoute(a,b,{boxes=[],source,target,index=0,used=[],returning=f
  for(let i=1;i<points.length;i++){const p=points[i-1],q=points[i],len=Math.abs(q.x-p.x);if(p.y===q.y&&len>longest){longest=len;label={x:(p.x+q.x)/2,y:p.y-12};}}
  // roundedRoute accepts the orthogonal M/H/V form.
  let path=`M ${a.x} ${a.y}`;for(let i=1;i<points.length;i++)path+=points[i].y===points[i-1].y?` H ${points[i].x}`:` V ${points[i].y}`;
- return {path:roundedRoute(path),label,feedback,points,unresolved,bottom:Math.max(...points.map(p=>p.y))+40};
+ return {path:roundedRoute(path,10),label,feedback,points,unresolved,bottom:Math.max(...points.map(p=>p.y))+40};
 }
 
 function highlightNodeEdges(nodeId) {
@@ -701,12 +903,10 @@ function drawEdges() {
   highlightArrow.id = 'arrow-highlight';
   highlightArrow.querySelector('path').setAttribute('fill', '#087c9b');
   svg.querySelector('defs').append(highlightArrow);
-  const bounds = $('stage').getBoundingClientRect();
-  const stage = $('stage');
-  svg.style.width = stage.scrollWidth + 'px'; svg.style.height = stage.scrollHeight + 'px';
+  const scale=state.positions.$view?.zoom || 1;
   const boxes = [...$('board').children].filter(el => el.classList.contains('node')).map(el => {
     const r = el.getBoundingClientRect();
-    return {id:el.dataset.id, x:r.left-bounds.left+stage.scrollLeft, y:r.top-bounds.top+stage.scrollTop, width:r.width, height:r.height};
+    return {id:el.dataset.id,...canvasPoint(r.left,r.top),width:r.width/scale,height:r.height/scale};
   });
   const used = [];
   state.draft.forEach((edge, index) => {
@@ -714,8 +914,7 @@ function drawEdges() {
     const to = document.querySelector('[data-dot="in"][data-id="' + sel(edge.to.module) + '"][data-port="' + sel(edge.to.port) + '"]');
     if (!from || !to) return;
     const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
-    const x1 = a.left + a.width / 2 - bounds.left + stage.scrollLeft, y1 = a.top + a.height / 2 - bounds.top + stage.scrollTop, x2 = b.left + b.width / 2 - bounds.left + stage.scrollLeft, y2 = b.top + b.height / 2 - bounds.top + stage.scrollTop;
-    const route = connectionRoute({x:x1,y:y1}, {x:x2,y:y2}, {boxes,source:from.closest('.node').dataset.id,target:to.closest('.node').dataset.id,index,used});
+    const route = connectionRoute(canvasPoint(a.left+a.width/2,a.top+a.height/2),canvasPoint(b.left+b.width/2,b.top+b.height/2), {boxes,source:from.closest('.node').dataset.id,target:to.closest('.node').dataset.id,index,used});
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('class', 'line');
     path.setAttribute('d', route.path);
@@ -748,6 +947,11 @@ function drawEdges() {
       group.append(label);
     }
   });
+  // Scrolling, zooming and panning move both layers together; routes stay in board coordinates.
+  svg.dataset.width=Math.max(1250,...boxes.map(r=>r.x+r.width+60),...used.flatMap(points=>points.map(p=>p.x+60)));
+  svg.dataset.height=Math.max(900,...boxes.map(r=>r.y+r.height+60),...used.flatMap(points=>points.map(p=>p.y+60)));
+  svg.setAttribute('viewBox',`0 0 ${svg.dataset.width} ${svg.dataset.height}`);
+  applyZoom();
   highlightNodeEdges($('board').querySelector('.node:hover')?.dataset.id ?? null);
 }
 
@@ -777,7 +981,7 @@ function startResize(event, el, id, direction) {
     el.classList.remove('resizing');
     if(handle.hasPointerCapture(event.pointerId))handle.releasePointerCapture(event.pointerId);
     state.positions[id]={...state.positions[id],x:el.offsetLeft,y:el.offsetTop,width:el.offsetWidth,height:el.offsetHeight};
-    markDirty(true);drawEdges();
+    layoutCards();markDirty(true);drawEdges();
   };
   handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);handle.addEventListener('lostpointercapture',end);
 }
@@ -817,11 +1021,12 @@ function startLink(event, dot) {
   path.setAttribute('stroke-width', '2');
   path.setAttribute('stroke-dasharray', '4 3');
   $('edges').appendChild(path);
-  linking = { direction:dot.dataset.dot, startX:event.clientX, startY:event.clientY, from: { module: dot.dataset.id, port: dot.dataset.port }, path, x: r.left + r.width / 2 - $('stage').getBoundingClientRect().left + $('stage').scrollLeft, y: r.top + r.height / 2 - $('stage').getBoundingClientRect().top + $('stage').scrollTop };
+  linking = { direction:dot.dataset.dot, startX:event.clientX, startY:event.clientY, from: { module: dot.dataset.id, port: dot.dataset.port }, path,...canvasPoint(r.left+r.width/2,r.top+r.height/2) };
 }
 document.addEventListener('mousemove', (e) => {
   if (!linking) return;
-  linking.path.setAttribute('d', 'M' + linking.x + ',' + linking.y + ' L' + (e.clientX - $('stage').getBoundingClientRect().left + $('stage').scrollLeft) + ',' + (e.clientY - $('stage').getBoundingClientRect().top + $('stage').scrollTop));
+  const point=canvasPoint(e.clientX,e.clientY);
+  linking.path.setAttribute('d', 'M' + linking.x + ',' + linking.y + ' L' + point.x + ',' + point.y);
 });
 document.addEventListener('mouseup', (e) => {
   if (!linking) return;
@@ -911,14 +1116,15 @@ async function enterCombo(id) {
   const member = level.members.find(m => m.id === id);
   if (!member) return;
   if (!await flushCanvas()) return;
-  state.path.push({ id, name: member.name });
+  state.path.push({id:state.levelId,name:level.name});
   openLevel(id, false);
 }
 
 async function goTo(id) {
   if (!await flushCanvas()) return;
   const index = state.path.findIndex(step => step.id === id);
-  state.path = index < 0 ? [] : state.path.slice(0, index);
+  if(index<0)return;
+  state.path = state.path.slice(0, index);
   openLevel(id, false);
 }
 
@@ -1118,7 +1324,6 @@ document.addEventListener('keydown', e => {
     setDrawer(false, true);
   }
 });
-$('stage').addEventListener('scroll', drawEdges);
 
 window.addEventListener('message', e => {
   if (e.origin !== location.origin || e.data?.type !== 'focus-boundary') return;
@@ -1288,6 +1493,8 @@ async function switchDraft(id, beforeSwitch) {
     if (!await flushCanvas()) return;
     const next = beforeSwitch ? await beforeSwitch() : id;
     const target = new URL('/',location.origin);
+    const scope=new URLSearchParams(location.search).get('scope');
+    if(scope)target.searchParams.set('scope',scope);
     if (next) target.searchParams.set('draft',next);
     location.assign(target);
   } catch (error) { toast(error.message,6500,true); }
