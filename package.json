@@ -1,0 +1,23 @@
+{
+  "name": "project-framework",
+  "version": "3.1.0",
+  "description": "人与 AI 协作的轻量项目框架与命令行工具",
+  "type": "module",
+  "bin": {
+    "pf": "./bin/pf.mjs"
+  },
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./structure": "./lib/structure.mjs",
+    "./check": "./lib/check.mjs",
+    "./run": "./lib/run.mjs",
+    "./workflow": "./lib/workflow.mjs",
+    "./canvas": "./lib/canvas/canvas.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs tests/canvas/*.test.mjs"
+  }
+}
